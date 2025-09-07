@@ -20,6 +20,8 @@ const initialImageState: ImageState = {
   compressedSize: null,
 };
 
+type Workflow = 'generate' | 'refine';
+
 const App: React.FC = () => {
   const [brideImage, setBrideImage] = useState<ImageState>(initialImageState);
   const [groomImage, setGroomImage] = useState<ImageState>(initialImageState);
@@ -38,6 +40,10 @@ const App: React.FC = () => {
   const [generateInvite, setGenerateInvite] = useState<boolean>(false);
   const [finalInviteImage, setFinalInviteImage] = useState<GeneratedImageHistory | null>(null);
 
+  // State for the new "refine existing" feature
+  const [refinementImage, setRefinementImage] = useState<ImageState>(initialImageState);
+  const [refinementImageType, setRefinementImageType] = useState<GenerationType | null>(null);
+
   const [chatState, setChatState] = useState<ChatState>({
     isOpen: false,
     targetImageId: null,
@@ -45,6 +51,9 @@ const App: React.FC = () => {
     isSending: false,
     attachment: null,
   });
+  
+  const [activeWorkflow, setActiveWorkflow] = useState<Workflow>('generate');
+
 
   const isBrideOptionAvailable = !!brideImage.compressedBase64;
   const isGroomOptionAvailable = !!groomImage.compressedBase64;
@@ -82,7 +91,7 @@ const App: React.FC = () => {
   }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable, isCouplePhotoAvailable]);
 
 
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card' | 'inviteBg' | 'couplePhoto') => {
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card' | 'inviteBg' | 'couplePhoto' | 'refine') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -110,6 +119,7 @@ const App: React.FC = () => {
         else if (imageType === 'groom') setGroomImage(newState);
         else if (imageType === 'couplePhoto') setCoupleImage(newState);
         else if (imageType === 'card') setCardImage(newState);
+        else if (imageType === 'refine') setRefinementImage(newState);
       } catch (err) {
         setError('Failed to compress image. Please try a different file.');
         console.error(err);
@@ -117,6 +127,46 @@ const App: React.FC = () => {
     };
     reader.readAsDataURL(file);
   }, []);
+
+  const handleStartRefining = useCallback(() => {
+    if (!refinementImage.compressedBase64 || !refinementImageType) return;
+
+    // Clear main generation inputs to reduce user confusion
+    setBrideImage(initialImageState);
+    setGroomImage(initialImageState);
+    setCoupleImage(initialImageState);
+    setCardImage(initialImageState);
+    setSelectedOutputs({ bride: false, groom: false, couple: false });
+
+    const titleMap: Record<GenerationType, string> = {
+        bride: 'Bride Illustration',
+        groom: 'Groom Illustration',
+        couple: 'Couple Illustration',
+    };
+
+    const newImageState: GeneratedImageState = {
+        originalBase64: refinementImage.originalBase64,
+        compressedBase64: refinementImage.compressedBase64,
+        originalSize: refinementImage.originalSize,
+        compressedSize: refinementImage.compressedSize,
+        title: titleMap[refinementImageType],
+        compressionQuality: refinementImage.compressedBase64.startsWith('data:image/png') ? 1.0 : 0.9,
+    };
+
+    const newHistory: GeneratedImageHistory = {
+        id: `refine-${Date.now()}`,
+        title: titleMap[refinementImageType],
+        versions: [newImageState],
+        currentVersionIndex: 0,
+    };
+
+    // Prepend to the list so it appears at the top
+    setGeneratedImages(prev => [newHistory, ...prev]);
+
+    // Reset the refinement UI state
+    setRefinementImage(initialImageState);
+    setRefinementImageType(null);
+  }, [refinementImage, refinementImageType]);
 
   const handleSelectionChange = (type: GenerationType) => {
     setSelectedOutputs(prev => ({...prev, [type]: !prev[type]}));
@@ -531,44 +581,107 @@ const App: React.FC = () => {
         </header>
 
         <main>
-          <div className="mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
-            <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 1: Upload Your Images</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <ImageUploader title="Bride's Headshot" imageState={brideImage} onFileChange={(e) => handleFileChange(e, 'bride')} id="bride-upload" isHeadshot={true} />
-              <ImageUploader title="Groom's Headshot" imageState={groomImage} onFileChange={(e) => handleFileChange(e, 'groom')} id="groom-upload" isHeadshot={true} />
-              <ImageUploader title="Couple's Photo (Optional)" imageState={coupleImage} onFileChange={(e) => handleFileChange(e, 'couplePhoto')} id="couple-upload" />
-              <ImageUploader title="Invitation Style (Optional)" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
-            </div>
-          </div>
-
-           <div className="text-center mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
-              <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 2: Choose What to Create</h2>
-              <fieldset className="max-w-3xl mx-auto mb-6 p-4 border-2 border-dashed border-[#C19A6B] rounded-xl">
-                  <legend className="px-2 font-semibold text-lg text-[#5D4037]">Generation Options</legend>
-                  <div className="flex justify-center items-center gap-4 sm:gap-8 flex-wrap mt-2">
-                      <Checkbox id="bride-check" label="Bride Portrait" checked={selectedOutputs.bride} onChange={() => handleSelectionChange('bride')} disabled={!isBrideOptionAvailable} />
-                      <Checkbox id="groom-check" label="Groom Portrait" checked={selectedOutputs.groom} onChange={() => handleSelectionChange('groom')} disabled={!isGroomOptionAvailable} />
-                      <Checkbox id="couple-check" label="Couple Illustration" checked={selectedOutputs.couple} onChange={() => handleSelectionChange('couple')} disabled={!isCoupleOptionAvailable} />
-                      <Checkbox id="invite-check" label="Final Invitation" checked={generateInvite} onChange={() => setGenerateInvite(prev => !prev)} />
-                  </div>
-              </fieldset>
-
-              {generateInvite && (
-                <div className="max-w-md mx-auto my-6 p-4 bg-white/50 rounded-xl border-2 border-[#E0D5C1] animate-fade-in">
-                    <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">Upload Your Invitation</h3>
-                    <ImageUploader title="" imageState={weddingInviteBg} onFileChange={(e) => handleFileChange(e, 'inviteBg')} id="invite-bg-upload" />
-                </div>
-              )}
-
+          <div className="mb-10 p-2 bg-white/60 rounded-full shadow-lg border-2 border-[#E0D5C1] max-w-lg mx-auto grid grid-cols-2 gap-2">
             <button
-              onClick={handleGenerate}
-              disabled={isGenerateDisabled}
-              className="relative inline-flex items-center justify-center px-10 py-4 text-xl font-bold text-white bg-gradient-to-r from-[#C19A6B] to-[#8D6E63] rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-              aria-label="Generate wedding illustrations and invitation"
+              onClick={() => setActiveWorkflow('generate')}
+              className={`px-4 py-3 text-lg font-bold rounded-full transition-all duration-300 ease-in-out ${activeWorkflow === 'generate' ? 'bg-gradient-to-r from-[#C19A6B] to-[#8D6E63] text-white shadow-md' : 'text-[#5D4037] hover:bg-white/80'}`}
+              aria-pressed={activeWorkflow === 'generate'}
             >
-              {isLoading ? ( <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Creating...</> ) : (generateInvite ? 'Generate All' : 'Generate Illustrations')}
+              ✨ Generate New
+            </button>
+            <button
+              onClick={() => setActiveWorkflow('refine')}
+              className={`px-4 py-3 text-lg font-bold rounded-full transition-all duration-300 ease-in-out ${activeWorkflow === 'refine' ? 'bg-gradient-to-r from-[#C19A6B] to-[#8D6E63] text-white shadow-md' : 'text-[#5D4037] hover:bg-white/80'}`}
+              aria-pressed={activeWorkflow === 'refine'}
+            >
+              🎨 Refine Existing
             </button>
           </div>
+
+          {activeWorkflow === 'generate' && (
+            <div className="animate-fade-in">
+              <div className="mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
+                <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 1: Upload Your Photos</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <ImageUploader title="Bride's Headshot" imageState={brideImage} onFileChange={(e) => handleFileChange(e, 'bride')} id="bride-upload" isHeadshot={true} />
+                  <ImageUploader title="Groom's Headshot" imageState={groomImage} onFileChange={(e) => handleFileChange(e, 'groom')} id="groom-upload" isHeadshot={true} />
+                  <ImageUploader title="Couple's Photo (Optional)" imageState={coupleImage} onFileChange={(e) => handleFileChange(e, 'couplePhoto')} id="couple-upload" />
+                  <ImageUploader title="Invitation Style (Optional)" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
+                </div>
+              </div>
+
+              <div className="text-center mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
+                  <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 2: Choose Options & Generate</h2>
+                  <fieldset className="max-w-3xl mx-auto mb-6 p-4 border-2 border-dashed border-[#C19A6B] rounded-xl">
+                      <legend className="px-2 font-semibold text-lg text-[#5D4037]">Generation Options</legend>
+                      <div className="flex justify-center items-center gap-4 sm:gap-8 flex-wrap mt-2">
+                          <Checkbox id="bride-check" label="Bride Portrait" checked={selectedOutputs.bride} onChange={() => handleSelectionChange('bride')} disabled={!isBrideOptionAvailable} />
+                          <Checkbox id="groom-check" label="Groom Portrait" checked={selectedOutputs.groom} onChange={() => handleSelectionChange('groom')} disabled={!isGroomOptionAvailable} />
+                          <Checkbox id="couple-check" label="Couple Illustration" checked={selectedOutputs.couple} onChange={() => handleSelectionChange('couple')} disabled={!isCoupleOptionAvailable} />
+                          <Checkbox id="invite-check" label="Final Invitation" checked={generateInvite} onChange={() => setGenerateInvite(prev => !prev)} />
+                      </div>
+                  </fieldset>
+
+                  {generateInvite && (
+                    <div className="max-w-md mx-auto my-6 p-4 bg-white/50 rounded-xl border-2 border-[#E0D5C1] animate-fade-in">
+                        <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">Upload Your Invitation</h3>
+                        <ImageUploader title="" imageState={weddingInviteBg} onFileChange={(e) => handleFileChange(e, 'inviteBg')} id="invite-bg-upload" />
+                    </div>
+                  )}
+
+                <button
+                  onClick={handleGenerate}
+                  disabled={isGenerateDisabled}
+                  className="relative inline-flex items-center justify-center px-10 py-4 text-xl font-bold text-white bg-gradient-to-r from-[#C19A6B] to-[#8D6E63] rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  aria-label="Generate wedding illustrations and invitation"
+                >
+                  {isLoading ? ( <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Creating...</> ) : (generateInvite ? 'Generate All' : 'Generate Illustrations')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeWorkflow === 'refine' && (
+            <div className="animate-fade-in">
+                <div className="text-center mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
+                <h2 className="text-2xl font-bold text-center mb-1 text-[#5D4037]">Refine an Existing Illustration</h2>
+                <p className="text-gray-500 mb-6">Already have an illustration? Upload it here to start refining with our AI chat.</p>
+                <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                    <ImageUploader 
+                        title="Upload Your Illustration" 
+                        imageState={refinementImage} 
+                        onFileChange={(e) => handleFileChange(e, 'refine')} 
+                        id="refine-upload"
+                    />
+                    <div className="space-y-4">
+                        <div>
+                            <label htmlFor="type-select" className="block text-lg font-medium text-[#5D4037] mb-2 text-left">1. Select Illustration Type</label>
+                            <select
+                                id="type-select"
+                                value={refinementImageType || ''}
+                                onChange={(e) => setRefinementImageType(e.target.value as GenerationType)}
+                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#C19A6B] focus:border-[#C19A6B]"
+                            >
+                                <option value="" disabled>-- Please select --</option>
+                                <option value="bride">Bride Illustration</option>
+                                <option value="groom">Groom Illustration</option>
+                                <option value="couple">Couple Illustration</option>
+                            </select>
+                        </div>
+                        <button
+                            onClick={handleStartRefining}
+                            disabled={!refinementImage.compressedBase64 || !refinementImageType}
+                            className="w-full inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-purple-500 to-indigo-600 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Start refining uploaded illustration"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a6 6 0 00-6 6v3.586l-1.707 1.707A1 1 0 003 15v4a1 1 0 001 1h12a1 1 0 001-1v-4a1 1 0 00-.293-.707L16 11.586V8a6 6 0 00-6-6zM8 18a1 1 0 01-1-1v-1h6v1a1 1 0 01-1 1H8z" /></svg>
+                            Start Refining
+                        </button>
+                    </div>
+                </div>
+              </div>
+            </div>
+          )}
           
           <ChatModal 
             chatState={chatState}
