@@ -12,6 +12,7 @@ type GenerationType = 'bride' | 'groom' | 'couple';
 interface ImageInputs {
     bride?: string;
     groom?: string;
+
     card?: string;
 }
 
@@ -29,7 +30,7 @@ You are an expert wedding invitation illustrator. Your task is to create a singl
 - **Output Specification:**
   - The output must be a single image file.
   - Do not include any text, borders, or other elements from the invitation card in the final image.
-  - The background should be simple or transparent to allow for easy placement on a digital card.
+  - The background must be fully transparent. Do not add any color, texture, or objects to the background.
 `;
 };
 
@@ -119,7 +120,7 @@ You are an expert digital artist specializing in combining portraits. Your task 
 1.  **Preserve Style and Features:** It is crucial that you maintain the exact art style, facial features, colors, and attire from the individual illustrations. Do not redraw or reinterpret the characters.
 2.  **Combine and Compose:** Arrange the bride and groom together in a natural, celebratory pose suitable for a wedding portrait. They should look like they are in the same scene.
 3.  **Aesthetic Integration:** ${styleInstruction}
-4.  **Output:** The output must be a single image file of the couple. The background should be simple or transparent. Do not add text or borders.
+4.  **Output:** The output must be a single image file of the couple. The background **must be fully transparent**. Do not add text, borders, or any background color.
 `;
 
   const parts: Part[] = [
@@ -147,22 +148,44 @@ You are an expert digital artist specializing in combining portraits. Your task 
 
 export const createFinalInvitation = async (
   illustrationB64: string,
-  backgroundB64: string
+  invitationCardB64: string
 ): Promise<GenerateContentResponse> => {
   const prompt = `
-    As an expert wedding invitation designer, your task is to intelligently and aesthetically place the second image provided (the character illustration) onto the first image provided (the wedding invitation background).
+    You are an expert wedding invitation designer with an exceptional eye for layout and typography. Your task is to merge the provided character illustration (second image) onto the wedding invitation card (first image) to create a single, harmonious, and professional-looking final invitation.
 
-    **Instructions:**
-    1.  **Analyze the Background (First Image):** Examine the wedding invitation design to identify the most suitable empty space or designated area for a portrait.
-    2.  **Place and Scale the Illustration (Second Image):** Position and resize the character illustration so it looks like a natural and beautiful part of the invitation design. The placement should be harmonious with the existing text and design elements. Do not obscure important text.
-    3.  **Maintain Quality:** Ensure the final merged image is high-quality.
-    4.  **Final Output:** The output must be the complete, merged invitation image, with the same dimensions as the original background. Do not add any text or borders.
+    **CRITICAL RULE: DO NOT OBSCURE ANY TEXT.** The readability of all text on the invitation (names, dates, venue, etc.) is the absolute highest priority.
+
+    **Your process must be as follows:**
+
+    1.  **Text and Layout Analysis (Priority #1):**
+        *   First, meticulously identify ALL text elements on the invitation card (first image).
+        *   Map out the "safe zones" (areas with no text) and "no-go zones" (areas with text).
+        *   Analyze the invitation's layout, hierarchy, and existing design elements (borders, floral patterns, etc.) to understand the intended structure.
+
+    2.  **Artistic Style Integration:**
+        *   Deeply analyze the invitation's artistic style: its color palette, lighting, textures, and overall mood.
+        *   Modify the provided character illustration (second image) to seamlessly match this style. Adjust colors, lighting, and line work to make it look like it belongs on the card.
+        *   **Crucially:** While adapting the style, you must perfectly preserve the facial features and recognizable likeness of the couple.
+
+    3.  **Intelligent and Safe Placement:**
+        *   Based on your layout analysis, place the style-matched illustration into the most aesthetically pleasing **safe zone**.
+        *   The illustration must integrate with the design without disrupting the flow or covering **any text or critical information**.
+        *   **If there is limited empty space:**
+            *   Prioritize scaling the illustration down to fit into a smaller safe area.
+            *   Consider placing it creatively, perhaps integrated with a corner, a border, or alongside non-essential decorative graphics.
+            *   A smaller, well-placed illustration is infinitely better than a large one that covers text.
+        *   **Under NO circumstances should you move, alter, or regenerate the text from the original invitation.** You are a layout artist, not a copy editor. Your job is to place the art around the existing, unchangeable text.
+
+    4.  **Final Output:**
+        *   Produce a single, high-quality image that is the final, merged invitation.
+        *   The output dimensions must exactly match the original invitation card.
+        *   The result must look like a professionally designed invitation where the art and text were planned together from the start.
   `;
 
   const parts: Part[] = [
     { text: prompt },
     { 
-      inlineData: { mimeType: 'image/jpeg', data: backgroundB64 },
+      inlineData: { mimeType: 'image/jpeg', data: invitationCardB64 },
     },
     { 
       inlineData: { mimeType: 'image/jpeg', data: illustrationB64 },

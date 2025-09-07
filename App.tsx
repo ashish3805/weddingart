@@ -132,6 +132,17 @@ const App: React.FC = () => {
     reader.onload = async (event) => {
       const originalBase64 = event.target?.result as string;
       const originalSize = file.size;
+
+      if (imageType === 'inviteBg') {
+        const newState = {
+          originalBase64,
+          originalSize,
+          compressedBase64: originalBase64,
+          compressedSize: originalSize,
+        };
+        setWeddingInviteBg(newState);
+        return;
+      }
       
       try {
         const { compressedBase64, compressedSize } = await compressImage(originalBase64, 0.7);
@@ -139,10 +150,6 @@ const App: React.FC = () => {
         if (imageType === 'bride') setBrideImage(newState);
         else if (imageType === 'groom') setGroomImage(newState);
         else if (imageType === 'card') setCardImage(newState);
-        else if (imageType === 'inviteBg') {
-            setWeddingInviteBg(newState);
-        }
-
       } catch (err) {
         setError('Failed to compress image. Please try a different file.');
         console.error(err);
@@ -157,7 +164,8 @@ const App: React.FC = () => {
   
     const processApiResponse = async (
         response: GenerateContentResponse,
-        type: string
+        type: string,
+        quality: number = 0.9
     ): Promise<{ state: GeneratedImageState, b64: string } | null> => {
         if (response?.candidates?.[0]?.content?.parts) {
             for (const part of response.candidates[0].content.parts) {
@@ -165,7 +173,7 @@ const App: React.FC = () => {
                     const base64Data: string = part.inlineData.data;
                     const fullBase64 = `data:image/png;base64,${base64Data}`;
                     const originalSize = atob(base64Data).length;
-                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, 0.9);
+                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, quality);
                     
                     const state: GeneratedImageState = {
                         title: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
@@ -173,7 +181,7 @@ const App: React.FC = () => {
                         compressedBase64,
                         originalSize,
                         compressedSize,
-                        compressionQuality: 0.9,
+                        compressionQuality: quality,
                     };
                     return { state, b64: base64Data };
                 }
@@ -276,11 +284,11 @@ const App: React.FC = () => {
             if (illustrationToUse && illustrationToUse.originalBase64) {
                 try {
                     const illustrationB64 = illustrationToUse.originalBase64.split(',')[1];
-                    const backgroundB64 = weddingInviteBg.compressedBase64.split(',')[1];
+                    const invitationCardB64 = weddingInviteBg.compressedBase64.split(',')[1];
                     
-                    const response = await createFinalInvitation(illustrationB64, backgroundB64);
+                    const response = await createFinalInvitation(illustrationB64, invitationCardB64);
                     
-                    const processed = await processApiResponse(response, 'Final Wedding Invitation');
+                    const processed = await processApiResponse(response, 'Final Wedding Invitation', 0.95);
                     if (processed) {
                         setFinalInviteImage(processed.state);
                     } else {
@@ -419,7 +427,7 @@ const App: React.FC = () => {
 
               {generateInvite && (
                 <div className="max-w-md mx-auto my-6 p-4 bg-white/50 rounded-xl border-2 border-[#E0D5C1] animate-fade-in">
-                    <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">Upload Invitation Background</h3>
+                    <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">Upload Your Invitation</h3>
                     <ImageUploader title="" imageState={weddingInviteBg} onFileChange={(e) => handleFileChange(e, 'inviteBg')} id="invite-bg-upload" />
                 </div>
               )}
@@ -442,7 +450,7 @@ const App: React.FC = () => {
             <div className="mt-12 animate-fade-in">
               <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Your Custom Creations</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {generatedImages.map((image, index) => ( <OutputDisplay key={image.title} generatedImage={image} onCompressionChange={(e) => handleOutputCompressionChange(index, e)} onDownload={() => handleDownload(index)} /> ))}
+                  {generatedImages.map((image, index) => ( <OutputDisplay key={image.title} generatedImage={image} onCompressionChange={(e) => handleOutputCompressionChange(index, e)} onDownload={() => handleDownload(index)} showTransparency={true} /> ))}
                   {finalInviteImage && (
                     <OutputDisplay
                         generatedImage={finalInviteImage}
@@ -473,7 +481,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFile
             {title && <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">{title}</h3>}
             <input type="file" id={id} ref={inputRef} onChange={onFileChange} className="hidden" accept="image/jpeg, image/png, image/webp" aria-label={`Upload ${title}`} />
             <div onClick={handleAreaClick} className="flex-grow flex items-center justify-center aspect-w-3 aspect-h-4 rounded-lg border-2 border-dashed border-gray-300 hover:border-[#C19A6B] transition-colors cursor-pointer bg-gray-50 p-2" role="button" tabIndex={0} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleAreaClick()} >
-                {imageState.originalBase64 ? ( <img src={imageState.originalBase64} alt={`${title} preview`} className="max-h-full max-w-full object-contain rounded-md" /> ) : ( <div className="text-center text-gray-500"> <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg> <p className="mt-2">{title ? 'Click to upload image' : 'Upload background'}</p> </div> )}
+                {imageState.originalBase64 ? ( <img src={imageState.originalBase64} alt={`${title} preview`} className="max-h-full max-w-full object-contain rounded-md" /> ) : ( <div className="text-center text-gray-500"> <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg> <p className="mt-2">{title ? 'Click to upload image' : 'Upload invitation'}</p> </div> )}
             </div>
              {isHeadshot && !imageState.originalSize && ( <p className="text-xs text-center text-gray-500 mt-2"> Tip: Use a clear, forward-facing headshot for best results. </p> )}
             {imageState.originalSize && imageState.compressedSize && ( <div className="text-center text-sm text-gray-600 mt-3 bg-gray-100 p-2 rounded-md"> <p>Original: <span className="font-medium">{formatBytes(imageState.originalSize)}</span> | Compressed: <span className="font-medium text-green-700">{formatBytes(imageState.compressedSize)}</span></p> </div> )}
@@ -481,11 +489,11 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFile
     );
 };
 
-interface OutputDisplayProps { generatedImage: GeneratedImageState; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; }
-const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload }) => (
+interface OutputDisplayProps { generatedImage: GeneratedImageState; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; showTransparency?: boolean; }
+const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload, showTransparency = false }) => (
     <div className="text-center w-full">
         <h3 className="text-2xl font-bold mb-4 text-[#5D4037]">{generatedImage.title}</h3>
-        <div className="bg-white p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B]">
+        <div className={`p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B] ${showTransparency ? 'checkerboard' : 'bg-white'}`}>
             {generatedImage.compressedBase64 ? ( <img src={generatedImage.compressedBase64} alt={`Generated ${generatedImage.title}`} className="rounded-lg w-full" /> ) : ( <div className="w-full aspect-square bg-gray-200 animate-pulse rounded-lg"></div> )}
         </div>
         <div className="mt-6 p-4 bg-white/70 rounded-xl shadow-lg">

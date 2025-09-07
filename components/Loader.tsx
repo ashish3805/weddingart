@@ -6,7 +6,7 @@ const loadingMessages = [
   "Adding elegant details and traditional attire...",
   "Now, combining portraits into a couple's illustration...",
   "Ensuring perfect stylistic consistency...",
-  "Preparing your wedding invitation background...",
+  "Preparing your wedding invitation...",
   "AI is finding the perfect spot for the illustration...",
   "Finalizing your beautiful invitation..."
 ];
