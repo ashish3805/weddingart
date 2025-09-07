@@ -144,3 +144,38 @@ You are an expert digital artist specializing in combining portraits. Your task 
 
   return response;
 };
+
+export const createFinalInvitation = async (
+  illustrationB64: string,
+  backgroundB64: string
+): Promise<GenerateContentResponse> => {
+  const prompt = `
+    As an expert wedding invitation designer, your task is to intelligently and aesthetically place the second image provided (the character illustration) onto the first image provided (the wedding invitation background).
+
+    **Instructions:**
+    1.  **Analyze the Background (First Image):** Examine the wedding invitation design to identify the most suitable empty space or designated area for a portrait.
+    2.  **Place and Scale the Illustration (Second Image):** Position and resize the character illustration so it looks like a natural and beautiful part of the invitation design. The placement should be harmonious with the existing text and design elements. Do not obscure important text.
+    3.  **Maintain Quality:** Ensure the final merged image is high-quality.
+    4.  **Final Output:** The output must be the complete, merged invitation image, with the same dimensions as the original background. Do not add any text or borders.
+  `;
+
+  const parts: Part[] = [
+    { text: prompt },
+    { 
+      inlineData: { mimeType: 'image/jpeg', data: backgroundB64 },
+    },
+    { 
+      inlineData: { mimeType: 'image/jpeg', data: illustrationB64 },
+    }
+  ];
+
+  const response = await ai.models.generateContent({
+    model: model,
+    contents: { parts },
+    config: {
+      responseModalities: [Modality.IMAGE, Modality.TEXT],
+    },
+  });
+
+  return response;
+};

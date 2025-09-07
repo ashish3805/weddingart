@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { generateIllustration, combineIllustrations } from './services/geminiService';
+import { generateIllustration, combineIllustrations, createFinalInvitation } from './services/geminiService';
 import { CoupleIcon } from './components/CoupleIcon';
 import { Loader } from './components/Loader';
 import type { GenerateContentResponse } from '@google/genai';
@@ -87,6 +87,12 @@ const App: React.FC = () => {
       couple: false,
   });
 
+  // State for the new invite creator
+  const [weddingInviteBg, setWeddingInviteBg] = useState<ImageState>(initialImageState);
+  const [selectedIllustrationUrl, setSelectedIllustrationUrl] = useState<string | null>(null);
+  const [isGeneratingInvite, setIsGeneratingInvite] = useState<boolean>(false);
+  const [finalInviteImage, setFinalInviteImage] = useState<GeneratedImageState | null>(null);
+
   const isBrideOptionAvailable = !!brideImage.compressedBase64;
   const isGroomOptionAvailable = !!groomImage.compressedBase64;
   const isCoupleOptionAvailable = isBrideOptionAvailable && isGroomOptionAvailable;
@@ -101,12 +107,10 @@ const App: React.FC = () => {
     const prev = prevAvailabilityRef.current;
     let nextState = { ...selectedOutputs };
   
-    // Auto-check if newly available
     if (!prev.bride && isBrideOptionAvailable) nextState.bride = true;
     if (!prev.groom && isGroomOptionAvailable) nextState.groom = true;
     if (!prev.couple && isCoupleOptionAvailable) nextState.couple = true;
   
-    // Un-check if becomes unavailable
     if (!isBrideOptionAvailable && nextState.bride) nextState.bride = false;
     if (!isGroomOptionAvailable && nextState.groom) nextState.groom = false;
     if (!isCoupleOptionAvailable && nextState.couple) nextState.couple = false;
@@ -121,7 +125,7 @@ const App: React.FC = () => {
   }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable]);
 
 
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card') => {
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card' | 'inviteBg') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -132,15 +136,16 @@ const App: React.FC = () => {
       const originalSize = file.size;
       
       try {
-        const { compressedBase64, compressedSize } = await compressImage(originalBase64, 0.7); // Default 70% quality
+        const { compressedBase64, compressedSize } = await compressImage(originalBase64, 0.7);
         const newState = { originalBase64, originalSize, compressedBase64, compressedSize };
-        if (imageType === 'bride') {
-          setBrideImage(newState);
-        } else if (imageType === 'groom') {
-            setGroomImage(newState);
-        } else {
-          setCardImage(newState);
+        if (imageType === 'bride') setBrideImage(newState);
+        else if (imageType === 'groom') setGroomImage(newState);
+        else if (imageType === 'card') setCardImage(newState);
+        else if (imageType === 'inviteBg') {
+            setWeddingInviteBg(newState);
+            setFinalInviteImage(null); // Reset final invite if background changes
         }
+
       } catch (err) {
         setError('Failed to compress image. Please try a different file.');
         console.error(err);
@@ -152,6 +157,34 @@ const App: React.FC = () => {
   const handleSelectionChange = (type: GenerationType) => {
     setSelectedOutputs(prev => ({...prev, [type]: !prev[type]}));
   };
+  
+    const processApiResponse = async (
+        response: GenerateContentResponse,
+        type: string
+    ): Promise<{ state: GeneratedImageState, b64: string } | null> => {
+        if (response?.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    const base64Data: string = part.inlineData.data;
+                    const fullBase64 = `data:image/png;base64,${base64Data}`;
+                    const originalSize = atob(base64Data).length;
+                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, 0.9);
+                    
+                    const state: GeneratedImageState = {
+                        title: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
+                        originalBase64: fullBase64,
+                        compressedBase64,
+                        originalSize,
+                        compressedSize,
+                        compressionQuality: 0.9,
+                    };
+                    return { state, b64: base64Data };
+                }
+            }
+        }
+        return null;
+    };
+
 
   const handleGenerate = useCallback(async () => {
     setIsLoading(true);
@@ -168,37 +201,7 @@ const App: React.FC = () => {
     let generatedBrideB64: string | null = null;
     let generatedGroomB64: string | null = null;
 
-    // Helper to process API responses and avoid duplication
-    const processApiResponse = async (
-        response: GenerateContentResponse,
-        type: string
-    ): Promise<{ state: GeneratedImageState, b64: string } | null> => {
-        if (response?.candidates?.[0]?.content?.parts) {
-            for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData) {
-                    const base64Data: string = part.inlineData.data;
-                    const fullBase64 = `data:image/png;base64,${base64Data}`;
-                    const originalSize = atob(base64Data).length;
-                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, 0.9);
-                    
-                    const state: GeneratedImageState = {
-                        title: `${type.charAt(0).toUpperCase() + type.slice(1)} Illustration`,
-                        originalBase64: fullBase64,
-                        compressedBase64,
-                        originalSize,
-                        compressedSize,
-                        compressionQuality: 0.9,
-                    };
-                    return { state, b64: base64Data };
-                }
-            }
-        }
-        return null;
-    };
-
-
     try {
-        // Step 1: Generate individual portraits if they are selected OR needed for the couple illustration
         const needsBride = selectedOutputs.bride || selectedOutputs.couple;
         const needsGroom = selectedOutputs.groom || selectedOutputs.couple;
         
@@ -216,7 +219,7 @@ const App: React.FC = () => {
         if (needsBride && brideB64) {
             const brideResult = individualResults[resultIndex++];
             if (brideResult.status === 'fulfilled') {
-                const processed = await processApiResponse(brideResult.value, 'Bride');
+                const processed = await processApiResponse(brideResult.value, 'Bride Illustration');
                 if (processed) {
                     generatedBrideB64 = processed.b64;
                     if (selectedOutputs.bride) successfulResults.push(processed.state);
@@ -231,7 +234,7 @@ const App: React.FC = () => {
         if (needsGroom && groomB64) {
             const groomResult = individualResults[resultIndex++];
             if (groomResult.status === 'fulfilled') {
-                const processed = await processApiResponse(groomResult.value, 'Groom');
+                const processed = await processApiResponse(groomResult.value, 'Groom Illustration');
                 if (processed) {
                     generatedGroomB64 = processed.b64;
                     if (selectedOutputs.groom) successfulResults.push(processed.state);
@@ -243,14 +246,13 @@ const App: React.FC = () => {
             }
         }
         
-        setGeneratedImages([...successfulResults]); // Show individual portraits as they finish
+        setGeneratedImages([...successfulResults]);
 
-        // Step 2: Generate couple illustration if selected and prerequisites are met
         if (selectedOutputs.couple) {
             if (generatedBrideB64 && generatedGroomB64) {
                 try {
                     const response = await combineIllustrations(generatedBrideB64, generatedGroomB64, cardB64);
-                    const processed = await processApiResponse(response, 'Couple');
+                    const processed = await processApiResponse(response, 'Couple Illustration');
                     if (processed) {
                         successfulResults.push(processed.state);
                     } else {
@@ -277,14 +279,13 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [brideImage, groomImage, cardImage, selectedOutputs, isCoupleOptionAvailable]);
+  }, [brideImage, groomImage, cardImage, selectedOutputs]);
 
     const handleOutputCompressionChange = useCallback(async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
         const newQuality = parseFloat(e.target.value);
         const originalImage = generatedImages[index];
         if (!originalImage || !originalImage.originalBase64) return;
 
-        // Optimistic UI update for slider
         setGeneratedImages(prev => prev.map((img, i) => i === index ? { ...img, compressionQuality: newQuality } : img));
 
         try {
@@ -312,7 +313,7 @@ const App: React.FC = () => {
     const getIsGenerateDisabled = () => {
         if (isLoading) return true;
         const { bride, groom, couple } = selectedOutputs;
-        if (!bride && !groom && !couple) return true; // Nothing selected
+        if (!bride && !groom && !couple) return true;
 
         if (bride && !brideImage.compressedBase64) return true;
         if (groom && !groomImage.compressedBase64) return true;
@@ -321,6 +322,80 @@ const App: React.FC = () => {
         return false;
     };
     const isGenerateDisabled = getIsGenerateDisabled();
+
+    // --- Invite Creator Logic ---
+    useEffect(() => {
+        if (generatedImages.length > 0 && !selectedIllustrationUrl) {
+            const coupleImage = generatedImages.find(img => img.title.includes('Couple'));
+            const defaultSelection = coupleImage || generatedImages[0];
+            if (defaultSelection?.originalBase64) {
+                setSelectedIllustrationUrl(defaultSelection.originalBase64);
+            }
+        } else if (generatedImages.length === 0) {
+            setSelectedIllustrationUrl(null);
+        }
+    }, [generatedImages, selectedIllustrationUrl]);
+
+    const handleIllustrationSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const selectedUrl = e.target.value;
+        setSelectedIllustrationUrl(selectedUrl);
+        setFinalInviteImage(null); // Reset final invite if selection changes
+    };
+
+    const handleGenerateInvite = useCallback(async () => {
+        if (!selectedIllustrationUrl || !weddingInviteBg.compressedBase64) {
+            setError("Please select an illustration and upload an invite background.");
+            return;
+        }
+        setIsGeneratingInvite(true);
+        setError(null);
+        setFinalInviteImage(null);
+
+        try {
+            const illustrationB64 = selectedIllustrationUrl.split(',')[1];
+            const backgroundB64 = weddingInviteBg.compressedBase64.split(',')[1];
+            
+            const response = await createFinalInvitation(illustrationB64, backgroundB64);
+            
+            const processed = await processApiResponse(response, 'Final Wedding Invitation');
+            if (processed) {
+                setFinalInviteImage(processed.state);
+            } else {
+                throw new Error("The AI failed to generate the final invitation image.");
+            }
+
+        } catch (e: any) {
+            setError(`Failed to create the final invitation: ${e.message}`);
+        } finally {
+            setIsGeneratingInvite(false);
+        }
+    }, [selectedIllustrationUrl, weddingInviteBg.compressedBase64]);
+
+    const handleFinalInviteCompressionChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newQuality = parseFloat(e.target.value);
+        if (!finalInviteImage || !finalInviteImage.originalBase64) return;
+
+        setFinalInviteImage(prev => prev ? { ...prev, compressionQuality: newQuality } : null);
+
+        try {
+            const { compressedBase64, compressedSize } = await compressImage(finalInviteImage.originalBase64, newQuality);
+            setFinalInviteImage(prev => prev ? { ...prev, compressedBase64, compressedSize } : null);
+        } catch (error) {
+            console.error("Final invite compression failed:", error);
+            setError("Failed to re-compress the final invitation.");
+        }
+    }, [finalInviteImage]);
+
+    const handleFinalInviteDownload = useCallback(() => {
+        if (!finalInviteImage?.compressedBase64) return;
+
+        const link = document.createElement('a');
+        link.href = finalInviteImage.compressedBase64;
+        link.download = 'wedding-invitation.jpg';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }, [finalInviteImage]);
 
   return (
     <div className="min-h-screen bg-[#FDF6E8] text-[#5D4037] p-4 sm:p-8">
@@ -333,42 +408,28 @@ const App: React.FC = () => {
             Wedding Couple Illustrator AI
           </h1>
           <p className="mt-4 text-lg text-gray-600 max-w-3xl mx-auto">
-            Upload headshots of the bride and groom, and optionally, an invitation for style. Then choose which illustrations you'd like to create!
+            Create beautiful, hand-drawn style illustrations for your wedding invitations in just a few clicks.
           </p>
         </header>
 
         <main>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
-            <ImageUploader title="Bride's Headshot" imageState={brideImage} onFileChange={(e) => handleFileChange(e, 'bride')} id="bride-upload" isHeadshot={true} />
-            <ImageUploader title="Groom's Headshot" imageState={groomImage} onFileChange={(e) => handleFileChange(e, 'groom')} id="groom-upload" isHeadshot={true} />
-            <ImageUploader title="Invitation Style (Optional)" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
+          <div className="mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
+            <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 1: Upload Your Images</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <ImageUploader title="Bride's Headshot" imageState={brideImage} onFileChange={(e) => handleFileChange(e, 'bride')} id="bride-upload" isHeadshot={true} />
+              <ImageUploader title="Groom's Headshot" imageState={groomImage} onFileChange={(e) => handleFileChange(e, 'groom')} id="groom-upload" isHeadshot={true} />
+              <ImageUploader title="Invitation Style (Optional)" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
+            </div>
           </div>
 
-           <div className="text-center mb-10">
+           <div className="text-center mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
+              <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 2: Generate Illustrations</h2>
               <fieldset className="max-w-2xl mx-auto mb-6 p-4 border-2 border-dashed border-[#C19A6B] rounded-xl">
-                  <legend className="px-2 font-semibold text-lg text-[#5D4037]">Choose Illustrations to Generate</legend>
+                  <legend className="px-2 font-semibold text-lg text-[#5D4037]">Choose which illustrations to create</legend>
                   <div className="flex justify-center items-center gap-4 sm:gap-8 flex-wrap mt-2">
-                      <Checkbox
-                          id="bride-check"
-                          label="Bride Portrait"
-                          checked={selectedOutputs.bride}
-                          onChange={() => handleSelectionChange('bride')}
-                          disabled={!isBrideOptionAvailable}
-                      />
-                      <Checkbox
-                          id="groom-check"
-                          label="Groom Portrait"
-                          checked={selectedOutputs.groom}
-                          onChange={() => handleSelectionChange('groom')}
-                          disabled={!isGroomOptionAvailable}
-                      />
-                      <Checkbox
-                          id="couple-check"
-                          label="Couple Illustration"
-                          checked={selectedOutputs.couple}
-                          onChange={() => handleSelectionChange('couple')}
-                          disabled={!isCoupleOptionAvailable}
-                      />
+                      <Checkbox id="bride-check" label="Bride Portrait" checked={selectedOutputs.bride} onChange={() => handleSelectionChange('bride')} disabled={!isBrideOptionAvailable} />
+                      <Checkbox id="groom-check" label="Groom Portrait" checked={selectedOutputs.groom} onChange={() => handleSelectionChange('groom')} disabled={!isGroomOptionAvailable} />
+                      <Checkbox id="couple-check" label="Couple Illustration" checked={selectedOutputs.couple} onChange={() => handleSelectionChange('couple')} disabled={!isCoupleOptionAvailable} />
                   </div>
               </fieldset>
 
@@ -378,177 +439,124 @@ const App: React.FC = () => {
               className="relative inline-flex items-center justify-center px-10 py-4 text-xl font-bold text-white bg-gradient-to-r from-[#C19A6B] to-[#8D6E63] rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               aria-label="Generate wedding illustration"
             >
-              {isLoading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Creating...
-                </>
-              ) : (
-                'Generate Wedding Illustration'
-              )}
+              {isLoading ? ( <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Creating...</> ) : 'Generate Illustrations'}
             </button>
           </div>
 
           {isLoading && <Loader />}
           
-          {error && (
-            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md max-w-3xl mx-auto my-4 whitespace-pre-wrap" role="alert">
-              <p className="font-bold">An Error Occurred</p>
-              <p>{error}</p>
-            </div>
-          )}
+          {error && !isLoading && ( <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md max-w-3xl mx-auto my-4 whitespace-pre-wrap" role="alert"> <p className="font-bold">An Error Occurred</p> <p>{error}</p> </div> )}
 
           {generatedImages.length > 0 && (
             <div className="mt-12 animate-fade-in">
               <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Your Custom Illustrations</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {generatedImages.map((image, index) => (
-                      <OutputDisplay 
-                        key={image.title} // Use a more stable key
-                        generatedImage={image}
-                        onCompressionChange={(e) => handleOutputCompressionChange(index, e)}
-                        onDownload={() => handleDownload(index)}
-                      />
-                  ))}
+                  {generatedImages.map((image, index) => ( <OutputDisplay key={image.title} generatedImage={image} onCompressionChange={(e) => handleOutputCompressionChange(index, e)} onDownload={() => handleDownload(index)} /> ))}
               </div>
             </div>
           )}
+
+          {generatedImages.length > 0 && (
+            <div className="mt-16 pt-10 border-t-4 border-dashed border-[#C19A6B] animate-fade-in">
+                <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Step 3: Create Your Final Invitation</h2>
+                <div className="p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                        {/* Column 1: Controls */}
+                        <div className="space-y-6">
+                            <div>
+                                <label htmlFor="illustration-select" className="block text-lg font-semibold mb-2 text-[#5D4037]">1. Select Illustration</label>
+                                <select id="illustration-select" value={selectedIllustrationUrl || ''} onChange={handleIllustrationSelect} className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-[#C19A6B] focus:border-[#C19A6B]">
+                                    {generatedImages.map(img => <option key={img.title} value={img.originalBase64!}>{img.title}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                               <h3 className="text-lg font-semibold mb-2 text-[#5D4037]">2. Upload Invite Background</h3>
+                               <ImageUploader title="" imageState={weddingInviteBg} onFileChange={(e) => handleFileChange(e, 'inviteBg')} id="invite-bg-upload" />
+                            </div>
+                            <div>
+                                <button
+                                    onClick={handleGenerateInvite}
+                                    disabled={!selectedIllustrationUrl || !weddingInviteBg.compressedBase64 || isGeneratingInvite}
+                                    className="w-full relative inline-flex items-center justify-center px-10 py-4 text-xl font-bold text-white bg-gradient-to-r from-[#5D4037] to-[#8D6E63] rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                                >
+                                    {isGeneratingInvite ? (
+                                        <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Placing Illustration...</>
+                                    ) : 'Let AI Create Your Invite'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Column 2: Result */}
+                        <div className="bg-gray-200 rounded-lg shadow-inner flex items-center justify-center p-4 min-h-[400px] aspect-w-3 aspect-h-4 lg:aspect-none">
+                             {isGeneratingInvite ? (
+                                <div className="text-center">
+                                    <div className="w-12 h-12 mx-auto border-4 border-t-4 border-gray-300 border-t-[#C19A6B] rounded-full animate-spin"></div>
+                                    <p className="mt-4 font-semibold text-lg text-gray-600">AI is finding the perfect spot...</p>
+                                </div>
+                            ) : finalInviteImage ? (
+                                <OutputDisplay
+                                    generatedImage={finalInviteImage}
+                                    onCompressionChange={handleFinalInviteCompressionChange}
+                                    onDownload={handleFinalInviteDownload}
+                                />
+                            ) : (
+                                <div className="text-center text-gray-500">
+                                   <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                   <p className="mt-4 font-semibold text-lg">Your final invitation will appear here</p>
+                                   <p>Select an illustration, upload a background, and let the AI work its magic.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                     {error && (isGeneratingInvite || (finalInviteImage === null && weddingInviteBg.originalBase64)) && ( <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mt-4 rounded-lg shadow-md max-w-full mx-auto whitespace-pre-wrap" role="alert"> <p className="font-bold">An Error Occurred</p> <p>{error}</p> </div> )}
+                </div>
+            </div>
+           )}
+
         </main>
       </div>
     </div>
   );
 };
 
-interface CheckboxProps {
-    id: string;
-    label: string;
-    checked: boolean;
-    onChange: () => void;
-    disabled?: boolean;
-}
+interface CheckboxProps { id: string; label: string; checked: boolean; onChange: () => void; disabled?: boolean; }
+const Checkbox: React.FC<CheckboxProps> = ({ id, label, checked, onChange, disabled = false }) => ( <div className="flex items-center"> <input id={id} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} className="h-5 w-5 rounded border-gray-300 text-[#C19A6B] focus:ring-[#8D6E63] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" /> <label htmlFor={id} className={`ml-2 text-md font-medium text-[#5D4037] ${disabled ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}> {label} </label> </div> );
 
-const Checkbox: React.FC<CheckboxProps> = ({ id, label, checked, onChange, disabled = false }) => (
-    <div className="flex items-center">
-        <input
-            id={id}
-            type="checkbox"
-            checked={checked}
-            onChange={onChange}
-            disabled={disabled}
-            className="h-5 w-5 rounded border-gray-300 text-[#C19A6B] focus:ring-[#8D6E63] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-        />
-        <label htmlFor={id} className={`ml-2 text-md font-medium text-[#5D4037] ${disabled ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
-            {label}
-        </label>
-    </div>
-);
-
-
-interface ImageUploaderProps {
-    title: string;
-    imageState: ImageState;
-    onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-    id: string;
-    isHeadshot?: boolean;
-}
-
+interface ImageUploaderProps { title: string; imageState: ImageState; onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void; id: string; isHeadshot?: boolean; }
 const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFileChange, id, isHeadshot = false }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const handleAreaClick = () => inputRef.current?.click();
 
     return (
         <div className="bg-white rounded-2xl shadow-lg p-4 border-2 border-[#E0D5C1] transition-shadow duration-300 hover:shadow-xl flex flex-col">
-            <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">{title}</h3>
-            <input
-                type="file"
-                id={id}
-                ref={inputRef}
-                onChange={onFileChange}
-                className="hidden"
-                accept="image/jpeg, image/png, image/webp"
-                aria-label={`Upload ${title}`}
-            />
-            <div
-                onClick={handleAreaClick}
-                className="flex-grow flex items-center justify-center aspect-w-3 aspect-h-4 rounded-lg border-2 border-dashed border-gray-300 hover:border-[#C19A6B] transition-colors cursor-pointer bg-gray-50 p-2"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleAreaClick()}
-            >
-                {imageState.originalBase64 ? (
-                    <img src={imageState.originalBase64} alt={`${title} preview`} className="max-h-full max-w-full object-contain rounded-md" />
-                ) : (
-                    <div className="text-center text-gray-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                        <p className="mt-2">Click to upload image</p>
-                    </div>
-                )}
+            {title && <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">{title}</h3>}
+            <input type="file" id={id} ref={inputRef} onChange={onFileChange} className="hidden" accept="image/jpeg, image/png, image/webp" aria-label={`Upload ${title}`} />
+            <div onClick={handleAreaClick} className="flex-grow flex items-center justify-center aspect-w-3 aspect-h-4 rounded-lg border-2 border-dashed border-gray-300 hover:border-[#C19A6B] transition-colors cursor-pointer bg-gray-50 p-2" role="button" tabIndex={0} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleAreaClick()} >
+                {imageState.originalBase64 ? ( <img src={imageState.originalBase64} alt={`${title} preview`} className="max-h-full max-w-full object-contain rounded-md" /> ) : ( <div className="text-center text-gray-500"> <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg> <p className="mt-2">{title ? 'Click to upload image' : 'Upload background'}</p> </div> )}
             </div>
-             {isHeadshot && !imageState.originalSize && (
-                <p className="text-xs text-center text-gray-500 mt-2">
-                    Tip: Use a clear, forward-facing headshot for best results.
-                </p>
-            )}
-            {imageState.originalSize && imageState.compressedSize && (
-                <div className="text-center text-sm text-gray-600 mt-3 bg-gray-100 p-2 rounded-md">
-                    <p>Original: <span className="font-medium">{formatBytes(imageState.originalSize)}</span> | Compressed: <span className="font-medium text-green-700">{formatBytes(imageState.compressedSize)}</span></p>
-                </div>
-            )}
+             {isHeadshot && !imageState.originalSize && ( <p className="text-xs text-center text-gray-500 mt-2"> Tip: Use a clear, forward-facing headshot for best results. </p> )}
+            {imageState.originalSize && imageState.compressedSize && ( <div className="text-center text-sm text-gray-600 mt-3 bg-gray-100 p-2 rounded-md"> <p>Original: <span className="font-medium">{formatBytes(imageState.originalSize)}</span> | Compressed: <span className="font-medium text-green-700">{formatBytes(imageState.compressedSize)}</span></p> </div> )}
         </div>
     );
 };
 
-interface OutputDisplayProps {
-    generatedImage: GeneratedImageState;
-    onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-    onDownload: () => void;
-}
-
+interface OutputDisplayProps { generatedImage: GeneratedImageState; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; }
 const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload }) => (
-    <div className="text-center">
+    <div className="text-center w-full">
         <h3 className="text-2xl font-bold mb-4 text-[#5D4037]">{generatedImage.title}</h3>
         <div className="bg-white p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B]">
-            {generatedImage.compressedBase64 ? (
-              <img src={generatedImage.compressedBase64} alt={`Generated ${generatedImage.title}`} className="rounded-lg w-full" />
-            ) : (
-              <div className="w-full aspect-square bg-gray-200 animate-pulse rounded-lg"></div>
-            )}
+            {generatedImage.compressedBase64 ? ( <img src={generatedImage.compressedBase64} alt={`Generated ${generatedImage.title}`} className="rounded-lg w-full" /> ) : ( <div className="w-full aspect-square bg-gray-200 animate-pulse rounded-lg"></div> )}
         </div>
         <div className="mt-6 p-4 bg-white/70 rounded-xl shadow-lg">
             <div className="mb-4">
                 <label htmlFor={`compression-${generatedImage.title}`} className="block text-md font-medium text-[#5D4037] mb-2">Adjust Image Quality</label>
                 <div className="flex items-center gap-4">
-                    <input
-                        id={`compression-${generatedImage.title}`}
-                        type="range"
-                        min="0.1"
-                        max="1"
-                        step="0.05"
-                        value={generatedImage.compressionQuality}
-                        onChange={onCompressionChange}
-                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                        aria-label={`Adjust compression quality for ${generatedImage.title}`}
-                    />
+                    <input id={`compression-${generatedImage.title}`} type="range" min="0.1" max="1" step="0.05" value={generatedImage.compressionQuality} onChange={onCompressionChange} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" aria-label={`Adjust compression quality for ${generatedImage.title}`} />
                     <span className="font-semibold text-lg text-[#8D6E63] w-16 text-right">{Math.round(generatedImage.compressionQuality * 100)}%</span>
                 </div>
             </div>
-            {generatedImage.originalSize && generatedImage.compressedSize && (
-                <div className="text-center text-md text-gray-700 my-3 bg-gray-100 p-2 rounded-md">
-                    <p>Est. Original: <span className="font-medium">{formatBytes(generatedImage.originalSize)}</span></p>
-                    <p>Compressed: <span className="font-medium text-green-700">{formatBytes(generatedImage.compressedSize)}</span></p>
-                </div>
-            )}
-            <button
-                onClick={onDownload}
-                className="w-full mt-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-green-500 to-green-700 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out"
-                aria-label={`Download ${generatedImage.title}`}
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                Download
-            </button>
+            {generatedImage.originalSize && generatedImage.compressedSize && ( <div className="text-center text-md text-gray-700 my-3 bg-gray-100 p-2 rounded-md"> <p>Est. Original: <span className="font-medium">{formatBytes(generatedImage.originalSize)}</span></p> <p>Compressed: <span className="font-medium text-green-700">{formatBytes(generatedImage.compressedSize)}</span></p> </div> )}
+            <button onClick={onDownload} className="w-full mt-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-green-500 to-green-700 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out" aria-label={`Download ${generatedImage.title}`} > <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download </button>
         </div>
     </div>
 );
