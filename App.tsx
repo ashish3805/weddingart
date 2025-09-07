@@ -514,13 +514,25 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFile
 };
 
 interface OutputDisplayProps { generatedImage: GeneratedImageState; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; showTransparency?: boolean; isQualityAdjustable?: boolean; }
-const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload, showTransparency = false, isQualityAdjustable = true }) => (
+const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload, showTransparency = false, isQualityAdjustable = true }) => {
+    const [showGrid, setShowGrid] = useState(showTransparency);
+
+    useEffect(() => {
+        setShowGrid(showTransparency);
+    }, [showTransparency]);
+
+    return (
     <div className="text-center w-full">
         <h3 className="text-2xl font-bold mb-4 text-[#5D4037]">{generatedImage.title}</h3>
-        <div className={`p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B] ${showTransparency ? 'checkerboard' : 'bg-white'}`}>
+        <div className={`p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B] transition-colors duration-300 ${showTransparency && showGrid ? 'checkerboard' : 'bg-gray-100'}`}>
             {generatedImage.compressedBase64 ? ( <img src={generatedImage.compressedBase64} alt={`Generated ${generatedImage.title}`} className="rounded-lg w-full" /> ) : ( <div className="w-full aspect-square bg-gray-200 animate-pulse rounded-lg"></div> )}
         </div>
         <div className="mt-6 p-4 bg-white/70 rounded-xl shadow-lg">
+            {showTransparency && (
+                <div className="flex justify-center mb-4">
+                     <Checkbox id={`grid-toggle-${generatedImage.title.replace(/\s+/g, '-')}`} label="Show Transparency Grid" checked={showGrid} onChange={() => setShowGrid(prev => !prev)} />
+                </div>
+            )}
             <div className="mb-4">
                 <label htmlFor={`compression-${generatedImage.title}`} className="block text-md font-medium text-[#5D4037] mb-2">Adjust Image Quality</label>
                 <div className="flex items-center gap-4">
@@ -533,6 +545,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompres
             <button onClick={onDownload} className="w-full mt-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-green-500 to-green-700 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out" aria-label={`Download ${generatedImage.title}`} > <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download </button>
         </div>
     </div>
-);
+    );
+};
 
 export default App;
