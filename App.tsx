@@ -78,6 +78,7 @@ const compressImage = (base64Str: string, quality: number, outputFormat: 'image/
 const App: React.FC = () => {
   const [brideImage, setBrideImage] = useState<ImageState>(initialImageState);
   const [groomImage, setGroomImage] = useState<ImageState>(initialImageState);
+  const [coupleImage, setCoupleImage] = useState<ImageState>(initialImageState);
   const [cardImage, setCardImage] = useState<ImageState>(initialImageState);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,12 +95,14 @@ const App: React.FC = () => {
 
   const isBrideOptionAvailable = !!brideImage.compressedBase64;
   const isGroomOptionAvailable = !!groomImage.compressedBase64;
-  const isCoupleOptionAvailable = isBrideOptionAvailable && isGroomOptionAvailable;
+  const isCouplePhotoAvailable = !!coupleImage.compressedBase64;
+  const isCoupleOptionAvailable = (isBrideOptionAvailable && isGroomOptionAvailable) || isCouplePhotoAvailable;
 
   const prevAvailabilityRef = useRef({
       bride: isBrideOptionAvailable,
       groom: isGroomOptionAvailable,
-      couple: isCoupleOptionAvailable
+      couple: isCoupleOptionAvailable,
+      couplePhoto: isCouplePhotoAvailable,
   });
 
   useEffect(() => {
@@ -109,6 +112,7 @@ const App: React.FC = () => {
     if (!prev.bride && isBrideOptionAvailable) nextState.bride = true;
     if (!prev.groom && isGroomOptionAvailable) nextState.groom = true;
     if (!prev.couple && isCoupleOptionAvailable) nextState.couple = true;
+    if (!prev.couplePhoto && isCouplePhotoAvailable) nextState.couple = true;
   
     if (!isBrideOptionAvailable && nextState.bride) nextState.bride = false;
     if (!isGroomOptionAvailable && nextState.groom) nextState.groom = false;
@@ -119,12 +123,13 @@ const App: React.FC = () => {
     prevAvailabilityRef.current = {
       bride: isBrideOptionAvailable,
       groom: isGroomOptionAvailable,
-      couple: isCoupleOptionAvailable
+      couple: isCoupleOptionAvailable,
+      couplePhoto: isCouplePhotoAvailable,
     };
-  }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable]);
+  }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable, isCouplePhotoAvailable, selectedOutputs]);
 
 
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card' | 'inviteBg') => {
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card' | 'inviteBg' | 'couplePhoto') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -150,6 +155,7 @@ const App: React.FC = () => {
         const newState = { originalBase64, originalSize, compressedBase64, compressedSize };
         if (imageType === 'bride') setBrideImage(newState);
         else if (imageType === 'groom') setGroomImage(newState);
+        else if (imageType === 'couplePhoto') setCoupleImage(newState);
         else if (imageType === 'card') setCardImage(newState);
       } catch (err) {
         setError('Failed to compress image. Please try a different file.');
@@ -205,6 +211,7 @@ const App: React.FC = () => {
 
     const brideB64 = brideImage.compressedBase64?.split(',')[1];
     const groomB64 = groomImage.compressedBase64?.split(',')[1];
+    const coupleB64 = coupleImage.compressedBase64?.split(',')[1];
     const cardB64 = cardImage.compressedBase64?.split(',')[1];
 
     const successfulResults: GeneratedImageState[] = [];
@@ -214,8 +221,8 @@ const App: React.FC = () => {
     let generatedGroomB64: string | null = null;
 
     try {
-        const needsBride = selectedOutputs.bride || selectedOutputs.couple;
-        const needsGroom = selectedOutputs.groom || selectedOutputs.couple;
+        const needsBride = selectedOutputs.bride || (selectedOutputs.couple && brideB64 && groomB64);
+        const needsGroom = selectedOutputs.groom || (selectedOutputs.couple && brideB64 && groomB64);
         
         const individualPromises = [];
         if (needsBride && brideB64) {
@@ -263,7 +270,7 @@ const App: React.FC = () => {
         if (selectedOutputs.couple) {
             if (generatedBrideB64 && generatedGroomB64) {
                 try {
-                    const response = await combineIllustrations(generatedBrideB64, generatedGroomB64, cardB64);
+                    const response = await combineIllustrations(generatedBrideB64, generatedGroomB64, cardB64, coupleB64);
                     const processed = await processApiResponse(response, 'Couple Illustration');
                     if (processed) {
                         successfulResults.push(processed.state);
@@ -273,14 +280,25 @@ const App: React.FC = () => {
                 } catch(e: any) {
                     failedReasons.push(`Failed to combine portraits: ${e.message}`);
                 }
+            } else if (coupleB64) {
+                 try {
+                    const response = await generateIllustration('couple', { couplePhoto: coupleB64, card: cardB64 });
+                    const processed = await processApiResponse(response, 'Couple Illustration');
+                    if (processed) {
+                        successfulResults.push(processed.state);
+                    } else {
+                        failedReasons.push('Failed to generate Couple illustration from the provided photo.');
+                    }
+                } catch(e: any) {
+                    failedReasons.push(`Failed to generate from couple photo: ${e.message}`);
+                }
             } else {
-                failedReasons.push('Couple illustration could not be created because one or both individual portraits failed to generate.');
+                failedReasons.push('Couple illustration could not be created. Please provide either a photo of the couple, or photos of both the bride and groom.');
             }
         }
 
         setGeneratedImages(successfulResults);
 
-        // --- One-shot Invite Generation Logic ---
         if (generateInvite && weddingInviteBg.compressedBase64) {
             const coupleIllustration = successfulResults.find(img => img.title.includes('Couple'));
             const brideIllustration = successfulResults.find(img => img.title.includes('Bride'));
@@ -322,7 +340,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [brideImage, groomImage, cardImage, selectedOutputs, generateInvite, weddingInviteBg.compressedBase64]);
+  }, [brideImage, groomImage, coupleImage, cardImage, selectedOutputs, generateInvite, weddingInviteBg.compressedBase64]);
 
     const handleOutputCompressionChange = useCallback(async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
         const newQuality = parseFloat(e.target.value);
@@ -416,9 +434,10 @@ const App: React.FC = () => {
         <main>
           <div className="mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
             <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 1: Upload Your Images</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <ImageUploader title="Bride's Headshot" imageState={brideImage} onFileChange={(e) => handleFileChange(e, 'bride')} id="bride-upload" isHeadshot={true} />
               <ImageUploader title="Groom's Headshot" imageState={groomImage} onFileChange={(e) => handleFileChange(e, 'groom')} id="groom-upload" isHeadshot={true} />
+              <ImageUploader title="Couple's Photo (Optional)" imageState={coupleImage} onFileChange={(e) => handleFileChange(e, 'couplePhoto')} id="couple-upload" />
               <ImageUploader title="Invitation Style (Optional)" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
             </div>
           </div>

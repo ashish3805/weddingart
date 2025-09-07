@@ -1,7 +1,11 @@
 
 import { GoogleGenAI, Modality, GenerateContentResponse, Part } from '@google/genai';
 
-const ai = new GoogleGenAI({ apiKey: "AIzaSyBKxKevs1rY2jn4k_FpN5yTHxYJoVaiJn8" });
+if (!process.env.API_KEY) {
+    throw new Error("API_KEY environment variable not set");
+}
+
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const model = 'gemini-2.5-flash-image-preview';
 
@@ -9,7 +13,7 @@ type GenerationType = 'bride' | 'groom' | 'couple';
 interface ImageInputs {
     bride?: string;
     groom?: string;
-
+    couplePhoto?: string;
     card?: string;
 }
 
@@ -31,7 +35,7 @@ You are an expert wedding invitation illustrator. Your task is to create a singl
 `;
 };
 
-const getPrompts = (cardProvided: boolean): Record<GenerationType, string> => ({
+const getPrompts = (cardProvided: boolean, couplePhotoProvided: boolean): Record<GenerationType, string> => ({
   bride: `
     ${getBasePrompt(cardProvided)}
     **Primary Goal: Recognizable Likeness of the Bride**
@@ -52,8 +56,8 @@ const getPrompts = (cardProvided: boolean): Record<GenerationType, string> => ({
     ${getBasePrompt(cardProvided)}
     **Primary Goal: Recognizable Likeness of the Couple**
     - Create a portrait of the Indian wedding couple together.
-    - The most important requirement is to ensure the illustrated couple is clearly and accurately recognizable as the individuals from their respective headshot photos.
-    - Pay very close attention to the specific facial features of the bride from her image and the groom from his. Capture their unique likenesses.
+    - The most important requirement is to ensure the illustrated couple is clearly and accurately recognizable as the individuals from their respective photos.
+    ${couplePhotoProvided ? "- A photo of the couple together has been provided. Use this as the primary reference for their likeness, pose, interaction, and relative heights." : "- Pay very close attention to the specific facial features of the bride from her image and the groom from his. Capture their unique likenesses."}
     - **Attire:**
         - **Groom:** Dress him in a handsome and elegant traditional Indian sherwani.
         - **Bride:** Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry.
@@ -66,19 +70,26 @@ export const generateIllustration = async (
   images: ImageInputs
 ): Promise<GenerateContentResponse> => {
   const cardProvided = !!images.card;
-  const prompts = getPrompts(cardProvided);
+  const couplePhotoProvided = !!images.couplePhoto;
+  const prompts = getPrompts(cardProvided, couplePhotoProvided);
   const prompt = prompts[type];
   const parts: Part[] = [{ text: prompt }];
 
-  if ((type === 'bride' || type === 'couple') && images.bride) {
+  if ((type === 'bride' || (type === 'couple' && !images.couplePhoto)) && images.bride) {
     parts.push({
       inlineData: { mimeType: 'image/jpeg', data: images.bride },
     });
   }
 
-  if ((type === 'groom' || type === 'couple') && images.groom) {
+  if ((type === 'groom' || (type === 'couple' && !images.couplePhoto)) && images.groom) {
     parts.push({
       inlineData: { mimeType: 'image/jpeg', data: images.groom },
+    });
+  }
+  
+  if (type === 'couple' && images.couplePhoto) {
+    parts.push({
+      inlineData: { mimeType: 'image/jpeg', data: images.couplePhoto },
     });
   }
 
@@ -102,29 +113,39 @@ export const generateIllustration = async (
 export const combineIllustrations = async (
   brideIllustration: string,
   groomIllustration: string,
-  card?: string
+  card?: string,
+  couplePhoto?: string,
 ): Promise<GenerateContentResponse> => {
   const cardProvided = !!card;
+  const couplePhotoProvided = !!couplePhoto;
   
   const styleInstruction = cardProvided
     ? "The overall mood, color palette, and artistic elegance must blend seamlessly with the aesthetic of the provided wedding card image."
     : "The final image should have warm, celebratory, and elegant tones suitable for a wedding invitation.";
+
+    const poseInstruction = couplePhotoProvided
+    ? "A photo of the couple has also been provided. Use this photo as a strong reference for their pose, interaction, and overall composition."
+    : "Arrange the bride and groom together in a natural, celebratory pose suitable for a wedding portrait.";
 
   const prompt = `
 You are an expert digital artist specializing in combining portraits. Your task is to take the two provided illustrations—one of a bride and one of a groom—and merge them into a single, cohesive couple's portrait.
 
 **Core Instructions:**
 1.  **Preserve Style and Features:** It is crucial that you maintain the exact art style, facial features, colors, and attire from the individual illustrations. Do not redraw or reinterpret the characters.
-2.  **Combine and Compose:** Arrange the bride and groom together in a natural, celebratory pose suitable for a wedding portrait. They should look like they are in the same scene.
+2.  **Combine and Compose:** ${poseInstruction} They should look like they are in the same scene.
 3.  **Aesthetic Integration:** ${styleInstruction}
 4.  **Output:** The output must be a single image file of the couple. The background **must be fully transparent**. Do not add text, borders, or any background color.
 `;
 
   const parts: Part[] = [
     { text: prompt },
-    { inlineData: { mimeType: 'image/jpeg', data: brideIllustration } },
-    { inlineData: { mimeType: 'image/jpeg', data: groomIllustration } }
+    { inlineData: { mimeType: 'image/png', data: brideIllustration } },
+    { inlineData: { mimeType: 'image/png', data: groomIllustration } }
   ];
+
+  if (couplePhotoProvided && couplePhoto) {
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: couplePhoto } });
+  }
 
   if (cardProvided && card) {
     parts.push({
@@ -176,7 +197,7 @@ export const createFinalInvitation = async (
       inlineData: { mimeType: 'image/jpeg', data: invitationCardB64 },
     },
     { 
-      inlineData: { mimeType: 'image/jpeg', data: illustrationB64 },
+      inlineData: { mimeType: 'image/png', data: illustrationB64 },
     }
   ];
 
