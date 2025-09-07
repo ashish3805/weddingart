@@ -26,6 +26,12 @@ interface GeneratedImageHistory {
 
 type GenerationType = 'bride' | 'groom' | 'couple';
 
+interface ChatHistoryItem {
+    role: 'user' | 'model';
+    text: string;
+    image?: string;
+}
+
 const initialImageState: ImageState = {
   originalBase64: null,
   compressedBase64: null,
@@ -103,13 +109,15 @@ const App: React.FC = () => {
   const [chatState, setChatState] = useState<{
     isOpen: boolean;
     targetImageId: string | null;
-    history: Array<{ role: 'user' | 'model'; text: string }>;
+    history: ChatHistoryItem[];
     isSending: boolean;
+    attachment: { data: string; name: string } | null;
   }>({
     isOpen: false,
     targetImageId: null,
     history: [],
     isSending: false,
+    attachment: null,
   });
 
   const isBrideOptionAvailable = !!brideImage.compressedBase64;
@@ -487,36 +495,45 @@ const App: React.FC = () => {
     };
 
     const handleOpenChat = (imageId: string) => {
-        setChatState({ isOpen: true, targetImageId: imageId, history: [], isSending: false });
+        setChatState({ isOpen: true, targetImageId: imageId, history: [], isSending: false, attachment: null });
     };
 
     const handleCloseChat = () => {
-        setChatState({ isOpen: false, targetImageId: null, history: [], isSending: false });
+        setChatState({ isOpen: false, targetImageId: null, history: [], isSending: false, attachment: null });
     };
 
     const handleSendMessage = async (message: string) => {
-        if (!chatState.targetImageId || !message.trim() || chatState.isSending) return;
+      if (!chatState.targetImageId || (!message.trim() && !chatState.attachment) || chatState.isSending) return;
+    
+        const newHistoryEntry: ChatHistoryItem = {
+            role: 'user',
+            text: message,
+        };
+        if (chatState.attachment) {
+            newHistoryEntry.image = chatState.attachment.data;
+        }
 
-        setChatState(prev => ({ ...prev, isSending: true, history: [...prev.history, { role: 'user', text: message }] }));
-        
+        const newHistory = [...chatState.history, newHistoryEntry];
+        setChatState(prev => ({ ...prev, isSending: true, history: newHistory, attachment: null }));
+    
         try {
             const allImages = [...generatedImages, finalInviteImage].filter(Boolean) as GeneratedImageHistory[];
             const targetImageHistory = allImages.find(img => img.id === chatState.targetImageId);
             if (!targetImageHistory) throw new Error("Target image for refinement not found.");
-
+    
             const currentVersion = targetImageHistory.versions[targetImageHistory.currentVersionIndex];
             const base64ToRefine = currentVersion.originalBase64?.split(',')[1];
             const mimeType = currentVersion.originalBase64?.match(/data:(.*);base64,/)?.[1] || 'image/png';
-            
+    
             if (!base64ToRefine) throw new Error("Could not get image data for refinement.");
-
-            const response = await refineIllustration(base64ToRefine, mimeType, message);
+    
+            const response = await refineIllustration(base64ToRefine, mimeType, newHistory);
             const newTitle = `${targetImageHistory.title} V${targetImageHistory.versions.length + 1}`;
             const processed = await processApiResponse(response, newTitle);
-
+    
             if (processed) {
-                 const findAndApply = (setter: React.Dispatch<React.SetStateAction<any>>, findLogic: (img: GeneratedImageHistory) => boolean) => {
-                     setter((prev: any) => {
+                const findAndApply = (setter: React.Dispatch<React.SetStateAction<any>>, findLogic: (img: GeneratedImageHistory) => boolean) => {
+                    setter((prev: any) => {
                         const update = (img: GeneratedImageHistory) => {
                             if (findLogic(img)) {
                                 const newVersions = [...img.versions, processed.state];
@@ -529,21 +546,46 @@ const App: React.FC = () => {
                 };
                 findAndApply(setGeneratedImages, img => img.id === chatState.targetImageId);
                 findAndApply(setFinalInviteImage, img => img.id === chatState.targetImageId);
-
-                const textResponse = response.candidates?.[0]?.content?.parts.find(p => p.text)?.text;
+    
+                const textResponse = response.text;
                 if (textResponse) {
                     setChatState(prev => ({ ...prev, history: [...prev.history, { role: 'model', text: textResponse }] }));
                 }
             } else {
-                 throw new Error("The AI did not return a new image. Please try rephrasing your request.");
+                throw new Error("The AI did not return a new image. Please try rephrasing your request.");
             }
-
+    
         } catch (e: any) {
             const errorMessage = e instanceof Error ? e.message : "An unknown error occurred during refinement.";
             setChatState(prev => ({ ...prev, history: [...prev.history, { role: 'model', text: `Sorry, an error occurred: ${errorMessage}` }] }));
         } finally {
-            setChatState(prev => ({...prev, isSending: false}));
+            setChatState(prev => ({ ...prev, isSending: false }));
         }
+    };
+    
+    const handleChatAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) { // 5MB limit
+            alert('File is too large. Please select an image under 5MB.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const base64 = event.target?.result as string;
+            setChatState(prev => ({
+                ...prev,
+                attachment: { data: base64, name: file.name }
+            }));
+        };
+        reader.readAsDataURL(file);
+        e.target.value = ''; // Allow selecting the same file again
+    };
+    
+    const handleRemoveAttachment = () => {
+        setChatState(prev => ({ ...prev, attachment: null }));
     };
 
 
@@ -606,6 +648,8 @@ const App: React.FC = () => {
             chatState={chatState}
             onClose={handleCloseChat}
             onSendMessage={handleSendMessage}
+            onAttachmentChange={handleChatAttachment}
+            onRemoveAttachment={handleRemoveAttachment}
             targetImageTitle={
                 [...generatedImages, finalInviteImage].filter(Boolean).find(img => img?.id === chatState.targetImageId)?.title || ''
             }
@@ -656,9 +700,24 @@ const App: React.FC = () => {
   );
 };
 
-const ChatModal: React.FC<{chatState: any, onClose: () => void, onSendMessage: (msg: string) => void, targetImageTitle: string}> = ({chatState, onClose, onSendMessage, targetImageTitle}) => {
+interface ChatModalProps {
+    chatState: {
+        isOpen: boolean;
+        history: ChatHistoryItem[];
+        isSending: boolean;
+        attachment: { data: string; name: string } | null;
+    };
+    onClose: () => void;
+    onSendMessage: (msg: string) => void;
+    onAttachmentChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onRemoveAttachment: () => void;
+    targetImageTitle: string;
+}
+
+const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSendMessage, onAttachmentChange, onRemoveAttachment, targetImageTitle }) => {
     const [message, setMessage] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const attachmentInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -682,10 +741,13 @@ const ChatModal: React.FC<{chatState: any, onClose: () => void, onSendMessage: (
                     </button>
                 </header>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {chatState.history.map((msg: {role: string, text: string}, index: number) => (
+                    {chatState.history.map((msg, index) => (
                         <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'bg-[#8D6E63] text-white rounded-br-lg' : 'bg-gray-200 text-[#5D4037] rounded-bl-lg'}`}>
-                                <p className="text-sm" style={{whiteSpace: 'pre-wrap'}}>{msg.text}</p>
+                                {msg.image && (
+                                    <img src={msg.image} alt="User reference" className="mb-2 rounded-lg max-w-full h-auto" />
+                                )}
+                                {msg.text && <p className="text-sm" style={{whiteSpace: 'pre-wrap'}}>{msg.text}</p>}
                             </div>
                         </div>
                     ))}
@@ -702,19 +764,34 @@ const ChatModal: React.FC<{chatState: any, onClose: () => void, onSendMessage: (
                     )}
                     <div ref={messagesEndRef} />
                 </div>
-                <form onSubmit={handleSend} className="p-4 border-t bg-gray-50 rounded-b-2xl">
-                    <div className="flex items-center space-x-2">
+                <form onSubmit={handleSend} className="border-t bg-gray-50 rounded-b-2xl">
+                    {chatState.attachment && (
+                        <div className="p-2 border-b bg-gray-100 flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2 overflow-hidden">
+                                <img src={chatState.attachment.data} className="w-10 h-10 rounded object-cover flex-shrink-0" alt="Attachment preview" />
+                                <span className="truncate text-gray-600 font-medium">{chatState.attachment.name}</span>
+                            </div>
+                            <button onClick={onRemoveAttachment} type="button" className="p-1 rounded-full text-gray-500 hover:bg-gray-300 hover:text-gray-700" aria-label="Remove attachment">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    )}
+                    <div className="p-4 flex items-center space-x-2">
+                        <input type="file" ref={attachmentInputRef} onChange={onAttachmentChange} className="hidden" accept="image/jpeg, image/png, image/webp" />
+                        <button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={chatState.isSending} className="p-2 text-gray-500 hover:text-[#8D6E63] rounded-full hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Attach image">
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                        </button>
                         <textarea
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { handleSend(e); e.preventDefault(); } }}
-                            placeholder="e.g., 'Make the lehenga red' or 'Add a smile'"
+                            placeholder="e.g., 'Make her look more like this...'"
                             className="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#C19A6B] focus:border-[#C19A6B] resize-none"
                             rows={2}
                             disabled={chatState.isSending}
                             aria-label="Your refinement request"
                         />
-                        <button type="submit" disabled={!message.trim() || chatState.isSending} className="p-3 bg-[#C19A6B] text-white rounded-full hover:bg-[#8D6E63] transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" aria-label="Send message">
+                        <button type="submit" disabled={(!message.trim() && !chatState.attachment) || chatState.isSending} className="p-3 bg-[#C19A6B] text-white rounded-full hover:bg-[#8D6E63] transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" aria-label="Send message">
                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clipRule="evenodd" /></svg>
                         </button>
                     </div>

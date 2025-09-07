@@ -1,6 +1,5 @@
-import { GoogleGenAI, Modality, GenerateContentResponse, Part } from '@google/genai';
 
-process.env.API_KEY="AIzaSyBKxKevs1rY2jn4k_FpN5yTHxYJoVaiJn8"
+import { GoogleGenAI, Modality, GenerateContentResponse, Part } from '@google/genai';
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
@@ -16,6 +15,12 @@ interface ImageInputs {
     groom?: string;
     couplePhoto?: string;
     card?: string;
+}
+
+interface ChatHistoryItem {
+    role: 'user' | 'model';
+    text: string;
+    image?: string;
 }
 
 const getBasePrompt = (cardProvided: boolean) => {
@@ -216,20 +221,29 @@ export const createFinalInvitation = async (
 export const refineIllustration = async (
   base64ImageToRefine: string,
   imageMimeType: string,
-  prompt: string
+  chatHistory: ChatHistoryItem[]
 ): Promise<GenerateContentResponse> => {
+  const formattedHistory = chatHistory
+    .map(turn => {
+        const imageMarker = turn.image ? ' [Reference Image Attached]' : '';
+        return `${turn.role === 'user' ? 'User' : 'Artist'}: ${turn.text}${imageMarker}`;
+    })
+    .join('\n');
+
   const refinePrompt = `
-You are an expert digital artist and image editor. You have been given an existing illustration and a user request to modify it.
+You are an expert digital artist and image editor. You are in a conversation with a user to refine an illustration. You have been given the current version of the illustration, the full conversation history, and any reference images the user provided in the chat.
 
 **Your Task:**
-1.  **Analyze the Request:** Carefully read the user's prompt to understand the desired changes.
-2.  **Modify the Image:** Apply the requested modifications to the provided illustration.
+1.  **Analyze Everything:** Read the entire conversation history and look at all provided images (the original illustration and any user-attached references) to understand the full context and the user's complete vision. The latest message is the most important, but previous messages and images provide crucial context.
+2.  **Modify the Image:** Apply the modifications requested in the latest user message. Use any reference images provided by the user to guide your changes, especially for improving a person's likeness.
 3.  **Preserve Core Identity:** It is absolutely critical to maintain the person's recognizable facial features and the overall artistic style of the original illustration. Do not start from scratch.
 4.  **Transparent Background:** The final output image MUST have a fully transparent background, unless the user specifically asks for a background.
+5.  **Respond in Chat (Optional):** If appropriate, you can provide a short, conversational text response confirming the change. For example: "Here it is with the red lehenga!" or "I've made them stand closer together, how does this look?".
 
-User Request: "${prompt}"
+**Conversation History:**
+${formattedHistory}
 
-Modify the illustration based on this request and return only the new image.
+Based on this conversation and all provided images, modify the illustration and return the new version.
 `;
 
   const parts: Part[] = [
@@ -241,6 +255,21 @@ Modify the illustration based on this request and return only the new image.
       },
     },
   ];
+
+  for (const turn of chatHistory) {
+      if (turn.role === 'user' && turn.image) {
+          const [header, base64Data] = turn.image.split(',');
+          const mimeTypeMatch = header.match(/data:(.*);base64/);
+          if (base64Data && mimeTypeMatch) {
+              parts.push({
+                  inlineData: {
+                      mimeType: mimeTypeMatch[1],
+                      data: base64Data
+                  }
+              });
+          }
+      }
+  }
 
   const response = await ai.models.generateContent({
     model: model,
