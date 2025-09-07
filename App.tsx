@@ -320,15 +320,26 @@ const App: React.FC = () => {
             if (illustrationToUse && illustrationToUse.originalBase64) {
                 try {
                     const illustrationB64 = illustrationToUse.originalBase64.split(',')[1];
-                    const invitationCardB64 = weddingInviteBg.compressedBase64.split(',')[1];
-                    
-                    const response = await createFinalInvitation(illustrationB64, invitationCardB64);
-                    
-                    const processed = await processApiResponse(response, 'Final Wedding Invitation');
-                    if (processed) {
-                        setFinalInviteImage(processed.state);
+                    const invitationCardDataUrl = weddingInviteBg.compressedBase64;
+                    const match = invitationCardDataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,(.*)$/);
+
+                    if (match && match[1] && match[2]) {
+                        const invitationCardMimeType = match[1];
+                        const invitationCardB64 = match[2];
+
+                        const response = await createFinalInvitation(
+                            illustrationB64,
+                            { data: invitationCardB64, mimeType: invitationCardMimeType }
+                        );
+                        
+                        const processed = await processApiResponse(response, 'Final Wedding Invitation');
+                        if (processed) {
+                            setFinalInviteImage(processed.state);
+                        } else {
+                            failedReasons.push("The AI failed to generate the final invitation image.");
+                        }
                     } else {
-                        failedReasons.push("The AI failed to generate the final invitation image.");
+                        failedReasons.push("Could not parse the uploaded invitation background image. Please use a PNG, JPEG, or WEBP file.");
                     }
                 } catch (e: any) {
                     failedReasons.push(`Failed to create the final invitation: ${e.message}`);
