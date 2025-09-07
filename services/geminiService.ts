@@ -125,8 +125,8 @@ You are an expert digital artist specializing in combining portraits. Your task 
 
   const parts: Part[] = [
     { text: prompt },
-    { inlineData: { mimeType: 'image/png', data: brideIllustration } },
-    { inlineData: { mimeType: 'image/png', data: groomIllustration } }
+    { inlineData: { mimeType: 'image/jpeg', data: brideIllustration } },
+    { inlineData: { mimeType: 'image/jpeg', data: groomIllustration } }
   ];
 
   if (cardProvided && card) {
@@ -148,7 +148,7 @@ You are an expert digital artist specializing in combining portraits. Your task 
 
 export const createFinalInvitation = async (
   illustrationB64: string,
-  invitationCard: { data: string; mimeType: string; }
+  invitationCardB64: string
 ): Promise<GenerateContentResponse> => {
   const prompt = `
     You are an expert image editor specializing in graphic design. Your task is to place a couple's illustration (second image) onto a wedding invitation background (first image).
@@ -176,10 +176,10 @@ export const createFinalInvitation = async (
   const parts: Part[] = [
     { text: prompt },
     { 
-      inlineData: { mimeType: invitationCard.mimeType, data: invitationCard.data },
+      inlineData: { mimeType: 'image/jpeg', data: invitationCardB64 },
     },
     { 
-      inlineData: { mimeType: 'image/png', data: illustrationB64 },
+      inlineData: { mimeType: 'image/jpeg', data: illustrationB64 },
     }
   ];
 
