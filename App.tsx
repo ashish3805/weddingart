@@ -91,16 +91,48 @@ const App: React.FC = () => {
   const isGroomOptionAvailable = !!groomImage.compressedBase64;
   const isCoupleOptionAvailable = isBrideOptionAvailable && isGroomOptionAvailable;
 
+  const prevAvailabilityRef = useRef({
+      bride: isBrideOptionAvailable,
+      groom: isGroomOptionAvailable,
+      couple: isCoupleOptionAvailable
+  });
+
   useEffect(() => {
-    // If an option becomes unavailable, uncheck it to maintain a valid state.
-    setSelectedOutputs(prev => {
-        const nextState = { ...prev };
-        if (!isBrideOptionAvailable) nextState.bride = false;
-        if (!isGroomOptionAvailable) nextState.groom = false;
-        if (!isCoupleOptionAvailable) nextState.couple = false;
-        return nextState;
-    });
+    // This effect handles auto-checking options when an image is first uploaded.
+    const prev = prevAvailabilityRef.current;
+    const updates: Partial<Record<GenerationType, boolean>> = {};
+
+    if (!prev.bride && isBrideOptionAvailable) {
+        updates.bride = true;
+    }
+    if (!prev.groom && isGroomOptionAvailable) {
+        updates.groom = true;
+    }
+    if (!prev.couple && isCoupleOptionAvailable) {
+        updates.couple = true;
+    }
+
+    if (Object.keys(updates).length > 0) {
+        setSelectedOutputs(prevOutputs => ({ ...prevOutputs, ...updates }));
+    }
+
+    // This effect also handles unchecking options if they become unavailable.
+    const nextState = { ...selectedOutputs, ...updates };
+    if (!isBrideOptionAvailable) nextState.bride = false;
+    if (!isGroomOptionAvailable) nextState.groom = false;
+    if (!isCoupleOptionAvailable) nextState.couple = false;
+
+    setSelectedOutputs(nextState);
+
+    // Update the ref for the next render.
+    prevAvailabilityRef.current = {
+        bride: isBrideOptionAvailable,
+        groom: isGroomOptionAvailable,
+        couple: isCoupleOptionAvailable
+    };
+
   }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable]);
+
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card') => {
     const file = e.target.files?.[0];
