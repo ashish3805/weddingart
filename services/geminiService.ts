@@ -151,35 +151,26 @@ export const createFinalInvitation = async (
   invitationCardB64: string
 ): Promise<GenerateContentResponse> => {
   const prompt = `
-    You are an expert wedding invitation designer with an exceptional eye for layout and typography. Your task is to merge the provided character illustration (second image) onto the wedding invitation card (first image) to create a single, harmonious, and professional-looking final invitation.
+    You are an expert image editor specializing in graphic design. Your task is to place a couple's illustration (second image) onto a wedding invitation background (first image).
 
-    **CRITICAL RULE: DO NOT OBSCURE ANY TEXT.** The readability of all text on the invitation (names, dates, venue, etc.) is the absolute highest priority.
+    **THE GOLDEN RULE: DO NOT COVER ANY TEXT.**
+    This is the most critical instruction. The final image must have ALL original text from the invitation perfectly preserved and 100% readable. No text should be covered, overlapped, or made difficult to read. Violating this rule is a complete failure.
 
-    **Your process must be as follows:**
+    **Your process must be:**
+    1.  **Analyze the Invitation Layout:** First, carefully examine the invitation card (first image) and identify all text elements (names, dates, venue, RSVP, etc.). Mentally map out the "no-go" zones where text exists.
+    2.  **Find the Safe Zone:** Locate the largest empty or "safe" area on the invitation where the illustration can be placed without violating the Golden Rule.
+    3.  **Scale to Fit:** You MUST scale down the illustration to fit entirely within the safe zone you identified. It is better for the illustration to be smaller than for it to cover any text. This is a mandatory step.
+    4.  **Place and Blend:** Place the scaled illustration into the safe zone. Blend the bottom edge of the illustration with a soft, transparent fade to seamlessly integrate it with the background.
+    5.  **Final Check:** Before outputting, do a final check. Is ANY text from the original card obscured? If yes, you have failed. You must scale the image down more and place it again.
 
-    1.  **Text and Layout Analysis (Priority #1):**
-        *   First, meticulously identify ALL text elements on the invitation card (first image).
-        *   Map out the "safe zones" (areas with no text) and "no-go zones" (areas with text).
-        *   Analyze the invitation's layout, hierarchy, and existing design elements (borders, floral patterns, etc.) to understand the intended structure.
+    **What NOT to do:**
+    *   **DO NOT** move, redraw, or alter the text on the invitation. The text layout must remain exactly as it is in the original image.
+    *   **DO NOT** change the background of the invitation card.
 
-    2.  **Artistic Style Integration:**
-        *   Deeply analyze the invitation's artistic style: its color palette, lighting, textures, and overall mood.
-        *   Modify the provided character illustration (second image) to seamlessly match this style. Adjust colors, lighting, and line work to make it look like it belongs on the card.
-        *   **Crucially:** While adapting the style, you must perfectly preserve the facial features and recognizable likeness of the couple.
-
-    3.  **Intelligent and Safe Placement:**
-        *   Based on your layout analysis, place the style-matched illustration into the most aesthetically pleasing **safe zone**.
-        *   The illustration must integrate with the design without disrupting the flow or covering **any text or critical information**.
-        *   **If there is limited empty space:**
-            *   Prioritize scaling the illustration down to fit into a smaller safe area.
-            *   Consider placing it creatively, perhaps integrated with a corner, a border, or alongside non-essential decorative graphics.
-            *   A smaller, well-placed illustration is infinitely better than a large one that covers text.
-        *   **Under NO circumstances should you move, alter, or regenerate the text from the original invitation.** You are a layout artist, not a copy editor. Your job is to place the art around the existing, unchangeable text.
-
-    4.  **Final Output:**
-        *   Produce a single, high-quality image that is the final, merged invitation.
-        *   The output dimensions must exactly match the original invitation card.
-        *   The result must look like a professionally designed invitation where the art and text were planned together from the start.
+    **Final Output:**
+    *   A single, high-quality image of the final invitation with the illustration placed correctly.
+    *   The output dimensions must exactly match the original invitation card.
+    *   The result should look like the illustration was professionally added to the original, unchanged invitation card.
   `;
 
   const parts: Part[] = [
