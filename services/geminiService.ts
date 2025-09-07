@@ -12,10 +12,15 @@ type GenerationType = 'bride' | 'groom' | 'couple';
 interface ImageInputs {
     bride?: string;
     groom?: string;
-    card: string;
+    card?: string;
 }
 
-const getBasePrompt = (styleAndToneInstructions: string) => `
+const getBasePrompt = (cardProvided: boolean) => {
+    const styleAndToneInstructions = cardProvided
+        ? "The overall mood, color palette, and artistic elegance of your illustration must blend seamlessly with the aesthetic of the provided wedding card image. Use warm, celebratory tones that match the invitation."
+        : "Use warm, celebratory, and elegant tones suitable for a wedding invitation.";
+
+    return `
 You are an expert wedding invitation illustrator. Your task is to create a single, cohesive, hand-illustrated style artistic drawing.
 
 **Artistic Requirements:**
@@ -26,12 +31,11 @@ You are an expert wedding invitation illustrator. Your task is to create a singl
   - Do not include any text, borders, or other elements from the invitation card in the final image.
   - The background should be simple or transparent to allow for easy placement on a digital card.
 `;
+};
 
-const styleAndToneInstructions = "The overall mood, color palette, and artistic elegance of your illustration must blend seamlessly with the aesthetic of the provided wedding card image. Use warm, celebratory tones that match the invitation.";
-
-const prompts: Record<GenerationType, string> = {
+const getPrompts = (cardProvided: boolean): Record<GenerationType, string> => ({
   bride: `
-    ${getBasePrompt(styleAndToneInstructions)}
+    ${getBasePrompt(cardProvided)}
     **Primary Goal: Recognizable Likeness of the Bride**
     - Create a solo portrait of the Indian bride.
     - The most important requirement is to ensure the illustrated bride is clearly and accurately recognizable as the individual from the provided headshot photo.
@@ -39,7 +43,7 @@ const prompts: Record<GenerationType, string> = {
     - Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry. She should look happy and celebratory.
   `,
   groom: `
-    ${getBasePrompt(styleAndToneInstructions)}
+    ${getBasePrompt(cardProvided)}
     **Primary Goal: Recognizable Likeness of the Groom**
     - Create a solo portrait of the Indian groom.
     - The most important requirement is to ensure the illustrated groom is clearly and accurately recognizable as the individual from the provided headshot photo.
@@ -47,7 +51,7 @@ const prompts: Record<GenerationType, string> = {
     - Dress him in a handsome and elegant traditional Indian sherwani. He should look happy and celebratory.
   `,
   couple: `
-    ${getBasePrompt(styleAndToneInstructions)}
+    ${getBasePrompt(cardProvided)}
     **Primary Goal: Recognizable Likeness of the Couple**
     - Create a portrait of the Indian wedding couple together.
     - The most important requirement is to ensure the illustrated couple is clearly and accurately recognizable as the individuals from their respective headshot photos.
@@ -57,12 +61,14 @@ const prompts: Record<GenerationType, string> = {
         - **Bride:** Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry.
     - **Composition:** They should be posed together, looking happy and celebratory.
   `,
-};
+});
 
 export const generateIllustration = async (
   type: GenerationType,
   images: ImageInputs
 ): Promise<GenerateContentResponse> => {
+  const cardProvided = !!images.card;
+  const prompts = getPrompts(cardProvided);
   const prompt = prompts[type];
   const parts: Part[] = [{ text: prompt }];
 
@@ -78,9 +84,11 @@ export const generateIllustration = async (
     });
   }
 
-  parts.push({
-    inlineData: { mimeType: 'image/jpeg', data: images.card },
-  });
+  if (cardProvided && images.card) {
+    parts.push({
+      inlineData: { mimeType: 'image/jpeg', data: images.card },
+    });
+  }
 
   const response = await ai.models.generateContent({
     model: model,

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { generateIllustration } from './services/geminiService';
 import { CoupleIcon } from './components/CoupleIcon';
 import { Loader } from './components/Loader';
@@ -84,8 +84,23 @@ const App: React.FC = () => {
   const [selectedOutputs, setSelectedOutputs] = useState<Record<GenerationType, boolean>>({
       bride: false,
       groom: false,
-      couple: true,
+      couple: false,
   });
+
+  const isBrideOptionAvailable = !!brideImage.compressedBase64;
+  const isGroomOptionAvailable = !!groomImage.compressedBase64;
+  const isCoupleOptionAvailable = isBrideOptionAvailable && isGroomOptionAvailable;
+
+  useEffect(() => {
+    // If an option becomes unavailable, uncheck it to maintain a valid state.
+    setSelectedOutputs(prev => {
+        const nextState = { ...prev };
+        if (!isBrideOptionAvailable) nextState.bride = false;
+        if (!isGroomOptionAvailable) nextState.groom = false;
+        if (!isCoupleOptionAvailable) nextState.couple = false;
+        return nextState;
+    });
+  }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable]);
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card') => {
     const file = e.target.files?.[0];
@@ -120,11 +135,6 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!brideImage.compressedBase64 || !groomImage.compressedBase64 || !cardImage.compressedBase64) {
-      setError('Please upload a photo for the bride, groom, and invitation style.');
-      return;
-    }
-    
     const selectedTypes = (Object.keys(selectedOutputs) as GenerationType[]).filter(key => selectedOutputs[key]);
     if (selectedTypes.length === 0) {
       setError('Please select at least one type of illustration to generate.');
@@ -136,9 +146,9 @@ const App: React.FC = () => {
     setGeneratedImages([]);
 
     const generationPromises = selectedTypes.map(type => {
-        const brideB64 = brideImage.compressedBase64!.split(',')[1];
-        const groomB64 = groomImage.compressedBase64!.split(',')[1];
-        const cardB64 = cardImage.compressedBase64!.split(',')[1];
+        const brideB64 = brideImage.compressedBase64?.split(',')[1];
+        const groomB64 = groomImage.compressedBase64?.split(',')[1];
+        const cardB64 = cardImage.compressedBase64?.split(',')[1];
         return generateIllustration(type, { bride: brideB64, groom: groomB64, card: cardB64 });
     });
 
@@ -230,7 +240,18 @@ const App: React.FC = () => {
         document.body.removeChild(link);
     }, [generatedImages]);
 
-    const isGenerateDisabled = isLoading || !brideImage.compressedBase64 || !groomImage.compressedBase64 || !cardImage.compressedBase64 || Object.values(selectedOutputs).every(v => !v);
+    const getIsGenerateDisabled = () => {
+        if (isLoading) return true;
+        const { bride, groom, couple } = selectedOutputs;
+        if (!bride && !groom && !couple) return true; // Nothing selected
+
+        if (bride && !brideImage.compressedBase64) return true;
+        if (groom && !groomImage.compressedBase64) return true;
+        if (couple && !isCoupleOptionAvailable) return true;
+        
+        return false;
+    };
+    const isGenerateDisabled = getIsGenerateDisabled();
 
   return (
     <div className="min-h-screen bg-[#FDF6E8] text-[#5D4037] p-4 sm:p-8">
@@ -243,7 +264,7 @@ const App: React.FC = () => {
             Wedding Couple Illustrator AI
           </h1>
           <p className="mt-4 text-lg text-gray-600 max-w-3xl mx-auto">
-            Upload headshots of the bride and groom, and an invitation for style. Then choose which illustrations you'd like to create!
+            Upload headshots of the bride and groom, and optionally, an invitation for style. Then choose which illustrations you'd like to create!
           </p>
         </header>
 
@@ -251,7 +272,7 @@ const App: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
             <ImageUploader title="Bride's Headshot" imageState={brideImage} onFileChange={(e) => handleFileChange(e, 'bride')} id="bride-upload" isHeadshot={true} />
             <ImageUploader title="Groom's Headshot" imageState={groomImage} onFileChange={(e) => handleFileChange(e, 'groom')} id="groom-upload" isHeadshot={true} />
-            <ImageUploader title="Invitation Style Reference" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
+            <ImageUploader title="Invitation Style (Optional)" imageState={cardImage} onFileChange={(e) => handleFileChange(e, 'card')} id="card-upload" />
           </div>
 
            <div className="text-center mb-10">
@@ -263,18 +284,21 @@ const App: React.FC = () => {
                           label="Bride Portrait"
                           checked={selectedOutputs.bride}
                           onChange={() => handleSelectionChange('bride')}
+                          disabled={!isBrideOptionAvailable}
                       />
                       <Checkbox
                           id="groom-check"
                           label="Groom Portrait"
                           checked={selectedOutputs.groom}
                           onChange={() => handleSelectionChange('groom')}
+                          disabled={!isGroomOptionAvailable}
                       />
                       <Checkbox
                           id="couple-check"
                           label="Couple Illustration"
                           checked={selectedOutputs.couple}
                           onChange={() => handleSelectionChange('couple')}
+                          disabled={!isCoupleOptionAvailable}
                       />
                   </div>
               </fieldset>
@@ -287,7 +311,7 @@ const App: React.FC = () => {
             >
               {isLoading ? (
                 <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
@@ -334,18 +358,20 @@ interface CheckboxProps {
     label: string;
     checked: boolean;
     onChange: () => void;
+    disabled?: boolean;
 }
 
-const Checkbox: React.FC<CheckboxProps> = ({ id, label, checked, onChange }) => (
+const Checkbox: React.FC<CheckboxProps> = ({ id, label, checked, onChange, disabled = false }) => (
     <div className="flex items-center">
         <input
             id={id}
             type="checkbox"
             checked={checked}
             onChange={onChange}
-            className="h-5 w-5 rounded border-gray-300 text-[#C19A6B] focus:ring-[#8D6E63] cursor-pointer"
+            disabled={disabled}
+            className="h-5 w-5 rounded border-gray-300 text-[#C19A6B] focus:ring-[#8D6E63] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <label htmlFor={id} className="ml-2 text-md font-medium text-[#5D4037] cursor-pointer">
+        <label htmlFor={id} className={`ml-2 text-md font-medium text-[#5D4037] ${disabled ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
             {label}
         </label>
     </div>
