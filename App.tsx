@@ -1,36 +1,17 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { generateIllustration, combineIllustrations, createFinalInvitation, refineIllustration } from './services/geminiService';
-import { CoupleIcon } from './components/CoupleIcon';
-import { Loader } from './components/Loader';
 import type { GenerateContentResponse } from '@google/genai';
 
-interface ImageState {
-  originalBase64: string | null;
-  compressedBase64: string | null;
-  originalSize: number | null;
-  compressedSize: number | null;
-}
-
-interface GeneratedImageState extends ImageState {
-  title: string;
-  compressionQuality: number;
-}
-
-interface GeneratedImageHistory {
-  id: string;
-  title: string;
-  versions: GeneratedImageState[];
-  currentVersionIndex: number;
-}
-
-type GenerationType = 'bride' | 'groom' | 'couple';
-
-interface ChatHistoryItem {
-    role: 'user' | 'model';
-    text: string;
-    image?: string;
-}
+// Import from new modules
+import { ImageState, GeneratedImageState, GeneratedImageHistory, GenerationType, ChatHistoryItem, ChatState } from './types';
+import { compressImage } from './utils/imageUtils';
+import { CoupleIcon } from './components/CoupleIcon';
+import { Loader } from './components/Loader';
+import { Checkbox } from './components/Checkbox';
+import { ImageUploader } from './components/ImageUploader';
+import { OutputDisplay } from './components/OutputDisplay';
+import { ChatModal } from './components/ChatModal';
 
 const initialImageState: ImageState = {
   originalBase64: null,
@@ -38,55 +19,6 @@ const initialImageState: ImageState = {
   originalSize: null,
   compressedSize: null,
 };
-
-// Helper functions
-const formatBytes = (bytes: number, decimals = 2) => {
-  if (!+bytes) return '0 Bytes';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-};
-
-const compressImage = (base64Str: string, quality: number, outputFormat: 'image/jpeg' | 'image/png' = 'image/jpeg'): Promise<{ compressedBase64: string, compressedSize: number }> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.src = base64Str;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 1024;
-      const MAX_HEIGHT = 1024;
-      let width = img.width;
-      let height = img.height;
-
-      if (width > height) {
-        if (width > MAX_WIDTH) {
-          height *= MAX_WIDTH / width;
-          width = MAX_WIDTH;
-        }
-      } else {
-        if (height > MAX_HEIGHT) {
-          width *= MAX_HEIGHT / height;
-          height = MAX_HEIGHT;
-        }
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return reject(new Error('Could not get canvas context'));
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      const compressedBase64 = canvas.toDataURL(outputFormat, outputFormat === 'image/jpeg' ? quality : undefined);
-      const stringLength = compressedBase64.length - `data:${outputFormat};base64,`.length;
-      const sizeInBytes = 4 * Math.ceil(stringLength / 3) * 0.5624896334383812;
-      resolve({ compressedBase64, compressedSize: sizeInBytes });
-    };
-    img.onerror = (error) => reject(error);
-  });
-};
-
 
 const App: React.FC = () => {
   const [brideImage, setBrideImage] = useState<ImageState>(initialImageState);
@@ -106,13 +38,7 @@ const App: React.FC = () => {
   const [generateInvite, setGenerateInvite] = useState<boolean>(false);
   const [finalInviteImage, setFinalInviteImage] = useState<GeneratedImageHistory | null>(null);
 
-  const [chatState, setChatState] = useState<{
-    isOpen: boolean;
-    targetImageId: string | null;
-    history: ChatHistoryItem[];
-    isSending: boolean;
-    attachment: { data: string; name: string } | null;
-  }>({
+  const [chatState, setChatState] = useState<ChatState>({
     isOpen: false,
     targetImageId: null,
     history: [],
@@ -153,7 +79,7 @@ const App: React.FC = () => {
       couple: isCoupleOptionAvailable,
       couplePhoto: isCouplePhotoAvailable,
     };
-  }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable, isCouplePhotoAvailable, selectedOutputs]);
+  }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable, isCouplePhotoAvailable]);
 
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, imageType: 'bride' | 'groom' | 'card' | 'inviteBg' | 'couplePhoto') => {
@@ -665,7 +591,7 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   {generatedImages.map((imageHistory) => {
                       const currentVersion = imageHistory.versions[imageHistory.currentVersionIndex];
-                      const isPng = !!currentVersion.compressedBase64?.startsWith('data:image/png');
+                      const isPng = !!currentVersion?.compressedBase64?.startsWith('data:image/png');
                       return (
                         <OutputDisplay 
                             key={imageHistory.id} 
@@ -698,176 +624,6 @@ const App: React.FC = () => {
       </div>
     </div>
   );
-};
-
-interface ChatModalProps {
-    chatState: {
-        isOpen: boolean;
-        history: ChatHistoryItem[];
-        isSending: boolean;
-        attachment: { data: string; name: string } | null;
-    };
-    onClose: () => void;
-    onSendMessage: (msg: string) => void;
-    onAttachmentChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-    onRemoveAttachment: () => void;
-    targetImageTitle: string;
-}
-
-const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSendMessage, onAttachmentChange, onRemoveAttachment, targetImageTitle }) => {
-    const [message, setMessage] = useState('');
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const attachmentInputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [chatState.history]);
-
-    const handleSend = (e: React.FormEvent) => {
-        e.preventDefault();
-        onSendMessage(message);
-        setMessage('');
-    };
-
-    if (!chatState.isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="chat-title">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg h-[80vh] flex flex-col transform transition-all animate-fade-in-up">
-                <header className="flex items-center justify-between p-4 border-b">
-                    <h2 id="chat-title" className="text-xl font-bold text-[#5D4037]">Refine: <span className="text-[#C19A6B]">{targetImageTitle}</span></h2>
-                    <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600" aria-label="Close chat">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                </header>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {chatState.history.map((msg, index) => (
-                        <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'bg-[#8D6E63] text-white rounded-br-lg' : 'bg-gray-200 text-[#5D4037] rounded-bl-lg'}`}>
-                                {msg.image && (
-                                    <img src={msg.image} alt="User reference" className="mb-2 rounded-lg max-w-full h-auto" />
-                                )}
-                                {msg.text && <p className="text-sm" style={{whiteSpace: 'pre-wrap'}}>{msg.text}</p>}
-                            </div>
-                        </div>
-                    ))}
-                     {chatState.isSending && (
-                        <div className="flex justify-start">
-                            <div className="max-w-xs md:max-w-md p-3 rounded-2xl bg-gray-200 text-[#5D4037] rounded-bl-lg">
-                                <div className="flex items-center space-x-2">
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </div>
-                <form onSubmit={handleSend} className="border-t bg-gray-50 rounded-b-2xl">
-                    {chatState.attachment && (
-                        <div className="p-2 border-b bg-gray-100 flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2 overflow-hidden">
-                                <img src={chatState.attachment.data} className="w-10 h-10 rounded object-cover flex-shrink-0" alt="Attachment preview" />
-                                <span className="truncate text-gray-600 font-medium">{chatState.attachment.name}</span>
-                            </div>
-                            <button onClick={onRemoveAttachment} type="button" className="p-1 rounded-full text-gray-500 hover:bg-gray-300 hover:text-gray-700" aria-label="Remove attachment">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                        </div>
-                    )}
-                    <div className="p-4 flex items-center space-x-2">
-                        <input type="file" ref={attachmentInputRef} onChange={onAttachmentChange} className="hidden" accept="image/jpeg, image/png, image/webp" />
-                        <button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={chatState.isSending} className="p-2 text-gray-500 hover:text-[#8D6E63] rounded-full hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Attach image">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                        </button>
-                        <textarea
-                            value={message}
-                            onChange={(e) => setMessage(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { handleSend(e); e.preventDefault(); } }}
-                            placeholder="e.g., 'Make her look more like this...'"
-                            className="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#C19A6B] focus:border-[#C19A6B] resize-none"
-                            rows={2}
-                            disabled={chatState.isSending}
-                            aria-label="Your refinement request"
-                        />
-                        <button type="submit" disabled={(!message.trim() && !chatState.attachment) || chatState.isSending} className="p-3 bg-[#C19A6B] text-white rounded-full hover:bg-[#8D6E63] transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" aria-label="Send message">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clipRule="evenodd" /></svg>
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-interface CheckboxProps { id: string; label: string; checked: boolean; onChange: () => void; disabled?: boolean; }
-const Checkbox: React.FC<CheckboxProps> = ({ id, label, checked, onChange, disabled = false }) => ( <div className="flex items-center"> <input id={id} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} className="h-5 w-5 rounded border-gray-300 text-[#C19A6B] focus:ring-[#8D6E63] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" /> <label htmlFor={id} className={`ml-2 text-md font-medium text-[#5D4037] ${disabled ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}> {label} </label> </div> );
-
-interface ImageUploaderProps { title: string; imageState: ImageState; onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void; id: string; isHeadshot?: boolean; }
-const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFileChange, id, isHeadshot = false }) => {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const handleAreaClick = () => inputRef.current?.click();
-
-    return (
-        <div className="bg-white rounded-2xl shadow-lg p-4 border-2 border-[#E0D5C1] transition-shadow duration-300 hover:shadow-xl flex flex-col">
-            {title && <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">{title}</h3>}
-            <input type="file" id={id} ref={inputRef} onChange={onFileChange} className="hidden" accept="image/jpeg, image/png, image/webp" aria-label={`Upload ${title}`} />
-            <div onClick={handleAreaClick} className="flex-grow flex items-center justify-center aspect-w-3 aspect-h-4 rounded-lg border-2 border-dashed border-gray-300 hover:border-[#C19A6B] transition-colors cursor-pointer bg-gray-50 p-2" role="button" tabIndex={0} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleAreaClick()} >
-                {imageState.originalBase64 ? ( <img src={imageState.originalBase64} alt={`${title} preview`} className="max-h-full max-w-full object-contain rounded-md" /> ) : ( <div className="text-center text-gray-500"> <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg> <p className="mt-2">{title ? 'Click to upload image' : 'Upload invitation'}</p> </div> )}
-            </div>
-             {isHeadshot && !imageState.originalSize && ( <p className="text-xs text-center text-gray-500 mt-2"> Tip: Use a clear, forward-facing headshot for best results. </p> )}
-            {imageState.originalSize && imageState.compressedSize && ( <div className="text-center text-sm text-gray-600 mt-3 bg-gray-100 p-2 rounded-md"> <p>Original: <span className="font-medium">{formatBytes(imageState.originalSize)}</span> | Compressed: <span className="font-medium text-green-700">{formatBytes(imageState.compressedSize)}</span></p> </div> )}
-        </div>
-    );
-};
-
-interface OutputDisplayProps { generatedImageHistory: GeneratedImageHistory; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; onRefine: () => void; onVersionChange: (direction: 'next' | 'prev') => void; showTransparency?: boolean; isQualityAdjustable?: boolean; }
-const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImageHistory, onCompressionChange, onDownload, onRefine, onVersionChange, showTransparency = false, isQualityAdjustable = true }) => {
-    const [showGrid, setShowGrid] = useState(showTransparency);
-    const currentVersion = generatedImageHistory.versions[generatedImageHistory.currentVersionIndex];
-    const hasMultipleVersions = generatedImageHistory.versions.length > 1;
-
-    useEffect(() => {
-        setShowGrid(showTransparency);
-    }, [showTransparency]);
-
-    return (
-    <div className="text-center w-full">
-        <h3 className="text-2xl font-bold mb-4 text-[#5D4037]">{generatedImageHistory.title}</h3>
-        <div className={`relative p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B] transition-colors duration-300 ${showTransparency && showGrid ? 'checkerboard' : 'bg-gray-100'}`}>
-            {currentVersion.compressedBase64 ? ( <img src={currentVersion.compressedBase64} alt={`Generated ${currentVersion.title}`} className="rounded-lg w-full" /> ) : ( <div className="w-full aspect-square bg-gray-200 animate-pulse rounded-lg"></div> )}
-            {hasMultipleVersions && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 text-white px-3 py-1 rounded-full flex items-center gap-4 text-sm">
-                <button onClick={() => onVersionChange('prev')} disabled={generatedImageHistory.currentVersionIndex === 0} className="disabled:opacity-50">&lt;</button>
-                <span>V{generatedImageHistory.currentVersionIndex + 1} / {generatedImageHistory.versions.length}</span>
-                <button onClick={() => onVersionChange('next')} disabled={generatedImageHistory.currentVersionIndex === generatedImageHistory.versions.length - 1} className="disabled:opacity-50">&gt;</button>
-              </div>
-            )}
-        </div>
-        <div className="mt-6 p-4 bg-white/70 rounded-xl shadow-lg">
-            {showTransparency && (
-                <div className="flex justify-center mb-4">
-                     <Checkbox id={`grid-toggle-${currentVersion.title.replace(/\s+/g, '-')}`} label="Show Transparency Grid" checked={showGrid} onChange={() => setShowGrid(prev => !prev)} />
-                </div>
-            )}
-            <div className="mb-4">
-                <label htmlFor={`compression-${currentVersion.title}`} className="block text-md font-medium text-[#5D4037] mb-2">Adjust Image Quality</label>
-                <div className="flex items-center gap-4">
-                    <input id={`compression-${currentVersion.title}`} type="range" min="0.1" max="1" step="0.05" value={currentVersion.compressionQuality} onChange={onCompressionChange} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:bg-gray-300 disabled:cursor-not-allowed" aria-label={`Adjust compression quality for ${currentVersion.title}`} disabled={!isQualityAdjustable} />
-                    <span className="font-semibold text-lg text-[#8D6E63] w-16 text-right">{Math.round(currentVersion.compressionQuality * 100)}%</span>
-                </div>
-                 {!isQualityAdjustable && <p className="text-xs text-gray-500 mt-2">Quality adjustment is for JPEGs. This is a PNG to preserve transparency.</p>}
-            </div>
-            {currentVersion.originalSize && currentVersion.compressedSize && ( <div className="text-center text-md text-gray-700 my-3 bg-gray-100 p-2 rounded-md"> <p>Est. Original: <span className="font-medium">{formatBytes(currentVersion.originalSize)}</span></p> <p>Compressed: <span className="font-medium text-green-700">{formatBytes(currentVersion.compressedSize)}</span></p> </div> )}
-             <button onClick={onRefine} className="w-full mb-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-purple-500 to-indigo-600 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out" aria-label={`Refine ${currentVersion.title} with AI chat`}>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a6 6 0 00-6 6v3.586l-1.707 1.707A1 1 0 003 15v4a1 1 0 001 1h12a1 1 0 001-1v-4a1 1 0 00-.293-.707L16 11.586V8a6 6 0 00-6-6zM8 18a1 1 0 01-1-1v-1h6v1a1 1 0 01-1 1H8z" /></svg>
-                Refine with AI Chat
-            </button>
-            <button onClick={onDownload} className="w-full mt-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-green-500 to-green-700 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out" aria-label={`Download ${currentVersion.title}`} > <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download </button>
-        </div>
-    </div>
-    );
 };
 
 export default App;
