@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatState, ChatHistoryItem } from '../types';
+import { ChatState, ChatHistoryItem, GenerationType } from '../types';
 
 interface ChatModalProps {
     chatState: ChatState;
@@ -9,9 +9,35 @@ interface ChatModalProps {
     onAttachmentChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onRemoveAttachment: () => void;
     targetImageTitle: string;
+    targetImageType: GenerationType | null;
 }
 
-export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSendMessage, onAttachmentChange, onRemoveAttachment, targetImageTitle }) => {
+const premadePrompts: Record<GenerationType, { title: string; prompt: string }[]> = {
+  bride: [
+    { title: 'Make Lehenga More Ornate', prompt: 'Make the lehenga more ornate and detailed with intricate embroidery.' },
+    { title: 'Change Lehenga to Red', prompt: 'Change the color of the lehenga to a deep, traditional red.' },
+    { title: 'Add a Veil (Dupatta)', prompt: 'Add a delicate, matching veil (dupatta) gracefully covering her head.' },
+    { title: 'Elaborate Jewelry', prompt: 'Make the necklace and earrings more prominent and elaborate.' },
+    { title: 'Softer Smile', prompt: 'Give her a softer, more gentle smile.' },
+  ],
+  groom: [
+    { title: 'Make Sherwani More Regal', prompt: 'Make the sherwani look more regal with elegant gold embroidery on the collar and cuffs.' },
+    { title: 'Change Sherwani to Blue', prompt: 'Change the color of the sherwani to a royal blue.' },
+    { title: 'Add a Turban (Safa)', prompt: 'Add a traditional, well-fitted turban (safa) to his head that complements his outfit.' },
+    { title: 'Add a Brooch (Kalgi)', prompt: 'Add a decorative brooch (kalgi) with a small feather to the turban.' },
+    { title: 'More Confident Look', prompt: 'Give him a more confident and happy expression.' },
+  ],
+  couple: [
+    { title: 'Closer Together', prompt: 'Make them stand closer together, shoulder to shoulder, in a romantic pose.' },
+    { title: 'Look at Each Other', prompt: 'Pose them so they are looking lovingly into each other\'s eyes.' },
+    { title: 'Groom\'s Arm Around Bride', prompt: 'Have the groom put his arm gently around the bride\'s shoulder or waist.' },
+    { title: 'More Painterly Style', prompt: 'Enhance the overall art style to be more painterly and artistic, with softer brush strokes.' },
+    { title: 'Vibrant Colors', prompt: 'Make the colors of their outfits and the overall scene more vibrant and rich.' },
+  ],
+};
+
+
+export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSendMessage, onAttachmentChange, onRemoveAttachment, targetImageTitle, targetImageType }) => {
     const [message, setMessage] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +64,30 @@ export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSend
                     </button>
                 </header>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {chatState.history.length === 0 && targetImageType && premadePrompts[targetImageType] && (
+                        <div className="text-center p-2 animate-fade-in">
+                            <h4 className="font-semibold text-gray-600 mb-3">Not sure where to start? Try one of these:</h4>
+                            <div className="flex flex-wrap justify-center gap-2">
+                                {premadePrompts[targetImageType].map((p) => (
+                                    <button 
+                                        key={p.title}
+                                        onClick={() => onSendMessage(p.prompt)}
+                                        className="px-3 py-2 text-sm bg-gray-200 text-[#5D4037] rounded-full hover:bg-[#C19A6B] hover:text-white transition-colors"
+                                    >
+                                        {p.title}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="relative my-4">
+                                <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                                    <div className="w-full border-t border-gray-300" />
+                                </div>
+                                <div className="relative flex justify-center">
+                                    <span className="bg-white px-2 text-sm text-gray-500">OR</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {chatState.history.map((msg: ChatHistoryItem, index: number) => (
                         <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'bg-[#8D6E63] text-white rounded-br-lg' : 'bg-gray-200 text-[#5D4037] rounded-bl-lg'}`}>
@@ -82,7 +132,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSend
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { handleSend(e); e.preventDefault(); } }}
-                            placeholder="e.g., 'Make her look more like this...'"
+                            placeholder="Type your refinement request..."
                             className="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#C19A6B] focus:border-[#C19A6B] resize-none"
                             rows={2}
                             disabled={chatState.isSending}

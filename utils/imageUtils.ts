@@ -36,6 +36,12 @@ export const compressImage = (base64Str: string, quality: number, outputFormat: 
       if (!ctx) {
         return reject(new Error('Could not get canvas context'));
       }
+
+      // Fill background with white. This is important for transparent images (PNGs)
+      // being converted to a format that doesn't support transparency (like JPEG).
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+
       ctx.drawImage(img, 0, 0, width, height);
       const compressedBase64 = canvas.toDataURL(outputFormat, outputFormat === 'image/jpeg' ? quality : undefined);
       const stringLength = compressedBase64.length - `data:${outputFormat};base64,`.length;

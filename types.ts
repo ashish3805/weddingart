@@ -33,3 +33,14 @@ export interface ChatState {
     isSending: boolean;
     attachment: { data: string; name: string } | null;
 }
+
+export type AttireType = 'bride' | 'groom';
+
+export interface AttireOption {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  imageUrl: string;
+  type: AttireType;
+}

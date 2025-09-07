@@ -12,6 +12,7 @@ import { ChatModal } from './components/ChatModal';
 import { GenerateWorkflow } from './components/GenerateWorkflow';
 import { RefineWorkflow } from './components/RefineWorkflow';
 import { CreationsDisplay } from './components/CreationsDisplay';
+import { brideAttireOptions, groomAttireOptions } from './data/attireOptions';
 
 
 const initialImageState: ImageState = {
@@ -40,6 +41,8 @@ const App: React.FC = () => {
   });
   const [generateInvite, setGenerateInvite] = useState<boolean>(false);
   const [refinementImageType, setRefinementImageType] = useState<GenerationType | null>(null);
+  const [selectedBrideAttire, setSelectedBrideAttire] = useState<string>(brideAttireOptions[0].id);
+  const [selectedGroomAttire, setSelectedGroomAttire] = useState<string>(groomAttireOptions[0].id);
 
   // State for outputs
   const [generatedImages, setGeneratedImages] = useState<GeneratedImageHistory[]>([]);
@@ -132,7 +135,7 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   }, []);
 
-  const handleStartRefining = useCallback(() => {
+  const handleAddToCreations = useCallback(() => {
     if (!refinementImage.compressedBase64 || !refinementImageType) return;
 
     // Clear main generation inputs to reduce user confusion
@@ -220,6 +223,9 @@ const App: React.FC = () => {
     const coupleB64 = coupleImage.compressedBase64?.split(',')[1];
     const cardB64 = cardImage.compressedBase64?.split(',')[1];
 
+    const brideAttirePrompt = brideAttireOptions.find(o => o.id === selectedBrideAttire)?.prompt;
+    const groomAttirePrompt = groomAttireOptions.find(o => o.id === selectedGroomAttire)?.prompt;
+
     const successfulResults: GeneratedImageHistory[] = [];
     const failedReasons: string[] = [];
 
@@ -232,10 +238,10 @@ const App: React.FC = () => {
         
         const individualPromises = [];
         if (needsBride && brideB64) {
-            individualPromises.push(generateIllustration('bride', { bride: brideB64, card: cardB64 }));
+            individualPromises.push(generateIllustration('bride', { bride: brideB64, card: cardB64 }, { bride: brideAttirePrompt }));
         }
         if (needsGroom && groomB64) {
-            individualPromises.push(generateIllustration('groom', { groom: groomB64, card: cardB64 }));
+            individualPromises.push(generateIllustration('groom', { groom: groomB64, card: cardB64 }, { groom: groomAttirePrompt }));
         }
         
         const individualResults = await Promise.allSettled(individualPromises);
@@ -303,7 +309,7 @@ const App: React.FC = () => {
                 }
             } else if (coupleB64) {
                  try {
-                    const response = await generateIllustration('couple', { couplePhoto: coupleB64, card: cardB64 });
+                    const response = await generateIllustration('couple', { couplePhoto: coupleB64, card: cardB64 }, { bride: brideAttirePrompt, groom: groomAttirePrompt });
                     const processed = await processApiResponse(response, 'Couple Illustration');
                     if (processed) {
                         successfulResults.push({
@@ -374,7 +380,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [brideImage, groomImage, coupleImage, cardImage, selectedOutputs, generateInvite, weddingInviteBg.compressedBase64]);
+  }, [brideImage, groomImage, coupleImage, cardImage, selectedOutputs, generateInvite, weddingInviteBg.compressedBase64, selectedBrideAttire, selectedGroomAttire]);
 
     const handleOutputCompressionChange = useCallback(async (imageId: string, versionIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
         const newQuality = parseFloat(e.target.value);
@@ -480,9 +486,47 @@ const App: React.FC = () => {
     const handleCloseChat = () => {
         setChatState({ isOpen: false, targetImageId: null, history: [], isSending: false, attachment: null });
     };
+    
+    const processMultiModalResponse = async (
+        response: GenerateContentResponse,
+        title: string,
+        quality: number = 0.9
+    ): Promise<{ imageState: GeneratedImageState | null, textResponse: string | null }> => {
+        let imageState: GeneratedImageState | null = null;
+        let textParts: string[] = [];
+
+        if (response?.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData && !imageState) { // Only process the first image
+                    const base64Data: string = part.inlineData.data;
+                    const apiMimeType = part.inlineData.mimeType || 'image/png';
+                    const fullBase64 = `data:${apiMimeType};base64,${base64Data}`;
+                    const originalSize = atob(base64Data).length;
+
+                    const isIllustration = title.toLowerCase().includes('illustration');
+                    const outputFormat = isIllustration ? 'image/png' : 'image/jpeg';
+                    
+                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, quality, outputFormat);
+                    
+                    imageState = {
+                        title: title,
+                        originalBase64: fullBase64,
+                        compressedBase64,
+                        originalSize,
+                        compressedSize,
+                        compressionQuality: quality,
+                    };
+                } else if (part.text) {
+                    textParts.push(part.text);
+                }
+            }
+        }
+        
+        return { imageState, textResponse: textParts.join('\n').trim() || null };
+    };
 
     const handleSendMessage = async (message: string) => {
-      if (!chatState.targetImageId || (!message.trim() && !chatState.attachment) || chatState.isSending) return;
+        if (!chatState.targetImageId || (!message.trim() && !chatState.attachment) || chatState.isSending) return;
     
         const newHistoryEntry: ChatHistoryItem = {
             role: 'user',
@@ -507,15 +551,16 @@ const App: React.FC = () => {
             if (!base64ToRefine) throw new Error("Could not get image data for refinement.");
     
             const response = await refineIllustration(base64ToRefine, mimeType, newHistory);
+            
             const newTitle = `${targetImageHistory.title} V${targetImageHistory.versions.length + 1}`;
-            const processed = await processApiResponse(response, newTitle);
+            const { imageState, textResponse } = await processMultiModalResponse(response, newTitle);
     
-            if (processed) {
+            if (imageState) {
                 const findAndApply = (setter: React.Dispatch<React.SetStateAction<any>>, findLogic: (img: GeneratedImageHistory) => boolean) => {
                     setter((prev: any) => {
                         const update = (img: GeneratedImageHistory) => {
                             if (findLogic(img)) {
-                                const newVersions = [...img.versions, processed.state];
+                                const newVersions = [...img.versions, imageState];
                                 return { ...img, versions: newVersions, currentVersionIndex: newVersions.length - 1 };
                             }
                             return img;
@@ -526,12 +571,15 @@ const App: React.FC = () => {
                 findAndApply(setGeneratedImages, img => img.id === chatState.targetImageId);
                 findAndApply(setFinalInviteImage, img => img.id === chatState.targetImageId);
     
-                const textResponse = response.text;
                 if (textResponse) {
                     setChatState(prev => ({ ...prev, history: [...prev.history, { role: 'model', text: textResponse }] }));
                 }
             } else {
-                throw new Error("The AI did not return a new image. Please try rephrasing your request.");
+                if (textResponse) {
+                     setChatState(prev => ({ ...prev, history: [...prev.history, { role: 'model', text: `The AI responded, but didn't return a new image:\n\n"${textResponse}"\n\nPlease try rephrasing your request.` }] }));
+                } else {
+                    throw new Error("The AI did not return a new image. Please try rephrasing your request.");
+                }
             }
     
         } catch (e: any) {
@@ -573,6 +621,17 @@ const App: React.FC = () => {
       onRefine: handleOpenChat,
       onVersionChange: handleVersionChange,
   };
+  
+  const targetImage = [...generatedImages, finalInviteImage].filter(Boolean).find(img => img?.id === chatState.targetImageId);
+  const targetImageTitle = targetImage?.title || '';
+  let targetImageType: GenerationType | null = null;
+  if (targetImageTitle.toLowerCase().includes('bride')) {
+      targetImageType = 'bride';
+  } else if (targetImageTitle.toLowerCase().includes('groom')) {
+      targetImageType = 'groom';
+  } else if (targetImageTitle.toLowerCase().includes('couple')) {
+      targetImageType = 'couple';
+  }
 
   return (
     <div className="min-h-screen bg-[#FDF6E8] text-[#5D4037] p-4 sm:p-8">
@@ -629,6 +688,10 @@ const App: React.FC = () => {
                     groom: isGroomOptionAvailable,
                     couple: isCoupleOptionAvailable,
                 }}
+                selectedBrideAttire={selectedBrideAttire}
+                onBrideAttireChange={setSelectedBrideAttire}
+                selectedGroomAttire={selectedGroomAttire}
+                onGroomAttireChange={setSelectedGroomAttire}
             />
           )}
 
@@ -638,7 +701,7 @@ const App: React.FC = () => {
                 onFileChange={handleFileChange}
                 refinementImageType={refinementImageType}
                 onTypeChange={setRefinementImageType}
-                onStartRefining={handleStartRefining}
+                onAddToCreations={handleAddToCreations}
             />
           )}
           
@@ -648,9 +711,8 @@ const App: React.FC = () => {
             onSendMessage={handleSendMessage}
             onAttachmentChange={handleChatAttachment}
             onRemoveAttachment={handleRemoveAttachment}
-            targetImageTitle={
-                [...generatedImages, finalInviteImage].filter(Boolean).find(img => img?.id === chatState.targetImageId)?.title || ''
-            }
+            targetImageTitle={targetImageTitle}
+            targetImageType={targetImageType}
           />
 
           {isLoading && <Loader />}

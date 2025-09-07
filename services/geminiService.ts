@@ -41,43 +41,59 @@ You are an expert wedding invitation illustrator. Your task is to create a singl
 `;
 };
 
-const getPrompts = (cardProvided: boolean, couplePhotoProvided: boolean): Record<GenerationType, string> => ({
-  bride: `
-    ${getBasePrompt(cardProvided)}
-    **Primary Goal: Recognizable Likeness of the Bride**
-    - Create a solo portrait of the Indian bride.
-    - The most important requirement is to ensure the illustrated bride is clearly and accurately recognizable as the individual from the provided headshot photo.
-    - Pay very close attention to her specific facial features. Capture her unique likeness, including face shape, eyes, nose, and smile.
-    - Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry. She should look happy and celebratory.
-  `,
-  groom: `
-    ${getBasePrompt(cardProvided)}
-    **Primary Goal: Recognizable Likeness of the Groom**
-    - Create a solo portrait of the Indian groom.
-    - The most important requirement is to ensure the illustrated groom is clearly and accurately recognizable as the individual from the provided headshot photo.
-    - Pay very close attention to his specific facial features. Capture his unique likeness, including face shape, eyes, nose, and smile.
-    - Dress him in a handsome and elegant traditional Indian sherwani. He should look happy and celebratory.
-  `,
-  couple: `
-    ${getBasePrompt(cardProvided)}
-    **Primary Goal: Recognizable Likeness of the Couple**
-    - Create a portrait of the Indian wedding couple together.
-    - The most important requirement is to ensure the illustrated couple is clearly and accurately recognizable as the individuals from their respective photos.
-    ${couplePhotoProvided ? "- A photo of the couple together has been provided. Use this as the primary reference for their likeness, pose, interaction, and relative heights." : "- Pay very close attention to the specific facial features of the bride from her image and the groom from his. Capture their unique likenesses."}
-    - **Attire:**
-        - **Groom:** Dress him in a handsome and elegant traditional Indian sherwani.
-        - **Bride:** Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry.
-    - **Composition:** They should be posed together, looking happy and celebratory.
-  `,
-});
+const getPrompts = (
+    cardProvided: boolean,
+    couplePhotoProvided: boolean,
+    attire?: { bride?: string; groom?: string }
+): Record<GenerationType, string> => {
+    const brideAttireInstruction = attire?.bride
+        ? `Dress her in ${attire.bride}.`
+        : 'Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry.';
+    const groomAttireInstruction = attire?.groom
+        ? `Dress him in ${attire.groom}.`
+        : 'Dress him in a handsome and elegant traditional Indian sherwani.';
+    const coupleAttireInstruction = `
+    - **Groom:** ${groomAttireInstruction}
+    - **Bride:** ${brideAttireInstruction}
+    `;
+
+    return {
+        bride: `
+            ${getBasePrompt(cardProvided)}
+            **Primary Goal: Recognizable Likeness of the Bride**
+            - Create a solo portrait of the Indian bride.
+            - The most important requirement is to ensure the illustrated bride is clearly and accurately recognizable as the individual from the provided headshot photo.
+            - Pay very close attention to her specific facial features. Capture her unique likeness, including face shape, eyes, nose, and smile.
+            - ${brideAttireInstruction} She should look happy and celebratory.
+        `,
+        groom: `
+            ${getBasePrompt(cardProvided)}
+            **Primary Goal: Recognizable Likeness of the Groom**
+            - Create a solo portrait of the Indian groom.
+            - The most important requirement is to ensure the illustrated groom is clearly and accurately recognizable as the individual from the provided headshot photo.
+            - Pay very close attention to his specific facial features. Capture his unique likeness, including face shape, eyes, nose, and smile.
+            - ${groomAttireInstruction} He should look happy and celebratory.
+        `,
+        couple: `
+            ${getBasePrompt(cardProvided)}
+            **Primary Goal: Recognizable Likeness of the Couple**
+            - Create a portrait of the Indian wedding couple together.
+            - The most important requirement is to ensure the illustrated couple is clearly and accurately recognizable as the individuals from their respective photos.
+            ${couplePhotoProvided ? "- A photo of the couple together has been provided. Use this as the primary reference for their likeness, pose, interaction, and relative heights." : "- Pay very close attention to the specific facial features of the bride from her image and the groom from his. Capture their unique likenesses."}
+            - **Attire:**${coupleAttireInstruction}
+            - **Composition:** They should be posed together, looking happy and celebratory.
+        `,
+    };
+};
 
 export const generateIllustration = async (
   type: GenerationType,
-  images: ImageInputs
+  images: ImageInputs,
+  attire?: { bride?: string; groom?: string }
 ): Promise<GenerateContentResponse> => {
   const cardProvided = !!images.card;
   const couplePhotoProvided = !!images.couplePhoto;
-  const prompts = getPrompts(cardProvided, couplePhotoProvided);
+  const prompts = getPrompts(cardProvided, couplePhotoProvided, attire);
   const prompt = prompts[type];
   const parts: Part[] = [{ text: prompt }];
 
