@@ -6,9 +6,9 @@ import type { GenerateContentResponse } from '@google/genai';
 
 interface ImageState {
   originalBase64: string | null;
-  compressedBase64: string | null;
+  compressedBase64: string | null; // Will now hold the same as originalBase64
   originalSize: number | null;
-  compressedSize: number | null;
+  compressedSize: number | null; // Will now hold the same as originalSize
 }
 
 interface GeneratedImageState extends ImageState {
@@ -32,82 +32,6 @@ const formatBytes = (bytes: number, decimals = 2) => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-};
-
-const compressImage = (base64Str: string, quality: number): Promise<{ compressedBase64: string, compressedSize: number }> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.src = base64Str;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 1024;
-      const MAX_HEIGHT = 1024;
-      let width = img.width;
-      let height = img.height;
-
-      if (width > height) {
-        if (width > MAX_WIDTH) {
-          height *= MAX_WIDTH / width;
-          width = MAX_WIDTH;
-        }
-      } else {
-        if (height > MAX_HEIGHT) {
-          width *= MAX_HEIGHT / height;
-          height = MAX_HEIGHT;
-        }
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return reject(new Error('Could not get canvas context'));
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-      const stringLength = compressedBase64.length - 'data:image/jpeg;base64,'.length;
-      const sizeInBytes = 4 * Math.ceil(stringLength / 3) * 0.5624896334383812;
-      resolve({ compressedBase64, compressedSize: sizeInBytes });
-    };
-    img.onerror = (error) => reject(error);
-  });
-};
-
-const resizeImageForDisplay = (base64Str: string): Promise<{ resizedBase64: string, resizedSize: number }> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.src = base64Str;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 1024;
-      const MAX_HEIGHT = 1024;
-      let width = img.width;
-      let height = img.height;
-
-      if (width > height) {
-        if (width > MAX_WIDTH) {
-          height *= MAX_WIDTH / width;
-          width = MAX_WIDTH;
-        }
-      } else {
-        if (height > MAX_HEIGHT) {
-          width *= MAX_HEIGHT / height;
-          height = MAX_HEIGHT;
-        }
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return reject(new Error('Could not get canvas context'));
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      const resizedBase64 = canvas.toDataURL('image/png');
-      const stringLength = resizedBase64.length - 'data:image/png;base64,'.length;
-      const sizeInBytes = 4 * Math.ceil(stringLength / 3) * 0.5624896334383812;
-      resolve({ resizedBase64, resizedSize: sizeInBytes });
-    };
-    img.onerror = (error) => reject(error);
-  });
 };
 
 
@@ -169,28 +93,18 @@ const App: React.FC = () => {
     reader.onload = async (event) => {
       const originalBase64 = event.target?.result as string;
       const originalSize = file.size;
-
-      if (imageType === 'inviteBg') {
-        const newState = {
-          originalBase64,
-          originalSize,
-          compressedBase64: originalBase64,
-          compressedSize: originalSize,
-        };
-        setWeddingInviteBg(newState);
-        return;
-      }
       
-      try {
-        const { compressedBase64, compressedSize } = await compressImage(originalBase64, 0.7);
-        const newState = { originalBase64, originalSize, compressedBase64, compressedSize };
-        if (imageType === 'bride') setBrideImage(newState);
-        else if (imageType === 'groom') setGroomImage(newState);
-        else if (imageType === 'card') setCardImage(newState);
-      } catch (err) {
-        setError('Failed to compress image. Please try a different file.');
-        console.error(err);
-      }
+      const newState = {
+        originalBase64,
+        originalSize,
+        compressedBase64: originalBase64,
+        compressedSize: originalSize,
+      };
+
+      if (imageType === 'bride') setBrideImage(newState);
+      else if (imageType === 'groom') setGroomImage(newState);
+      else if (imageType === 'card') setCardImage(newState);
+      else if (imageType === 'inviteBg') setWeddingInviteBg(newState);
     };
     reader.readAsDataURL(file);
   }, []);
@@ -210,14 +124,12 @@ const App: React.FC = () => {
                     const fullBase64 = `data:image/png;base64,${base64Data}`;
                     const originalSize = atob(base64Data).length;
                     
-                    const { resizedBase64, resizedSize } = await resizeImageForDisplay(fullBase64);
-                    
                     const state: GeneratedImageState = {
                         title: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
                         originalBase64: fullBase64,
-                        compressedBase64: resizedBase64,
+                        compressedBase64: fullBase64, // Use original for display
                         originalSize,
-                        compressedSize: resizedSize,
+                        compressedSize: originalSize, // Use original size
                     };
                     return { state, b64: base64Data };
                 }
@@ -498,7 +410,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFile
                 {imageState.originalBase64 ? ( <img src={imageState.originalBase64} alt={`${title} preview`} className="max-h-full max-w-full object-contain rounded-md" /> ) : ( <div className="text-center text-gray-500"> <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg> <p className="mt-2">{title ? 'Click to upload image' : 'Upload invitation'}</p> </div> )}
             </div>
              {isHeadshot && !imageState.originalSize && ( <p className="text-xs text-center text-gray-500 mt-2"> Tip: Use a clear, forward-facing headshot for best results. </p> )}
-            {imageState.originalSize && imageState.compressedSize && ( <div className="text-center text-sm text-gray-600 mt-3 bg-gray-100 p-2 rounded-md"> <p>Original: <span className="font-medium">{formatBytes(imageState.originalSize)}</span> | Compressed: <span className="font-medium text-green-700">{formatBytes(imageState.compressedSize)}</span></p> </div> )}
+            {imageState.originalSize && ( <div className="text-center text-sm text-gray-600 mt-3 bg-gray-100 p-2 rounded-md"> <p>File Size: <span className="font-medium">{formatBytes(imageState.originalSize)}</span></p> </div> )}
         </div>
     );
 };
@@ -511,7 +423,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onDownloa
             {generatedImage.compressedBase64 ? ( <img src={generatedImage.compressedBase64} alt={`Generated ${generatedImage.title}`} className="rounded-lg w-full" /> ) : ( <div className="w-full aspect-square bg-gray-200 animate-pulse rounded-lg"></div> )}
         </div>
         <div className="mt-6 p-4 bg-white/70 rounded-xl shadow-lg">
-            {generatedImage.originalSize && generatedImage.compressedSize && ( <div className="text-center text-md text-gray-700 my-3 bg-gray-100 p-2 rounded-md"> <p>Full Size: <span className="font-medium">{formatBytes(generatedImage.originalSize)}</span></p> <p>Display Size: <span className="font-medium text-green-700">{formatBytes(generatedImage.compressedSize)}</span></p> </div> )}
+            {generatedImage.originalSize && ( <div className="text-center text-md text-gray-700 my-3 bg-gray-100 p-2 rounded-md"> <p>File Size: <span className="font-medium">{formatBytes(generatedImage.originalSize)}</span></p> </div> )}
             <button onClick={onDownload} className="w-full mt-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-green-500 to-green-700 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out" aria-label={`Download ${generatedImage.title}`} > <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download </button>
         </div>
     </div>
