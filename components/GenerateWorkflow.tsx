@@ -61,32 +61,8 @@ export const GenerateWorkflow: React.FC<GenerateWorkflowProps> = ({
         </div>
       </div>
 
-      {(availability.bride || availability.groom) && (
-        <div className="mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1] animate-fade-in">
-          <h2 className="text-2xl font-bold text-center mb-6 text-[#5D4037]">Step 2: Select Attire Style</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            {availability.bride && (
-              <AttireSelector
-                title="Bride's Attire"
-                options={brideAttireOptions}
-                selectedValue={selectedBrideAttire}
-                onChange={onBrideAttireChange}
-              />
-            )}
-            {availability.groom && (
-              <AttireSelector
-                title="Groom's Attire"
-                options={groomAttireOptions}
-                selectedValue={selectedGroomAttire}
-                onChange={onGroomAttireChange}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
       <div className="text-center mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
-          <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 3: Choose Options & Generate</h2>
+          <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 2: Choose Options & Generate</h2>
           <fieldset className="max-w-3xl mx-auto mb-6 p-4 border-2 border-dashed border-[#C19A6B] rounded-xl">
               <legend className="px-2 font-semibold text-lg text-[#5D4037]">Generation Options</legend>
               <div className="flex justify-center items-center gap-4 sm:gap-8 flex-wrap mt-2">
@@ -96,6 +72,37 @@ export const GenerateWorkflow: React.FC<GenerateWorkflowProps> = ({
                   <Checkbox id="invite-check" label="Final Invitation" checked={generateInvite} onChange={() => onGenerateInviteChange(!generateInvite)} />
               </div>
           </fieldset>
+          
+          {(availability.bride || availability.groom) && (
+            <details className="max-w-4xl mx-auto my-6 text-left group">
+              <summary className="list-none flex items-center justify-between p-3 bg-white/50 rounded-lg cursor-pointer hover:bg-white/80 transition-colors">
+                <span className="font-semibold text-lg text-[#5D4037]">Customize Attire (Optional)</span>
+                <svg className="w-6 h-6 text-[#8D6E63] transform transition-transform duration-300 group-open:rotate-180" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="p-6 mt-2 bg-white/60 rounded-b-lg border-t-2 border-[#E0D5C1] animate-fade-in">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {availability.bride && (
+                    <AttireSelector
+                      title="Bride's Attire"
+                      options={brideAttireOptions}
+                      selectedValue={selectedBrideAttire}
+                      onChange={onBrideAttireChange}
+                    />
+                  )}
+                  {availability.groom && (
+                    <AttireSelector
+                      title="Groom's Attire"
+                      options={groomAttireOptions}
+                      selectedValue={selectedGroomAttire}
+                      onChange={onGroomAttireChange}
+                    />
+                  )}
+                </div>
+              </div>
+            </details>
+          )}
 
           {generateInvite && (
             <div className="max-w-md mx-auto my-6 p-4 bg-white/50 rounded-xl border-2 border-[#E0D5C1] animate-fade-in">

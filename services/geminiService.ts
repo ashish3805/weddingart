@@ -46,12 +46,12 @@ const getPrompts = (
     couplePhotoProvided: boolean,
     attire?: { bride?: string; groom?: string }
 ): Record<GenerationType, string> => {
-    const brideAttireInstruction = attire?.bride
+    const brideAttireInstruction = (attire?.bride && attire.bride.trim() !== '')
         ? `Dress her in ${attire.bride}.`
-        : 'Dress her in a graceful and beautiful traditional Indian lehenga with delicate, complementary jewelry.';
-    const groomAttireInstruction = attire?.groom
+        : 'Her attire should be an elegant wedding style inspired by the clothing in her photo. Ensure it is tasteful and matches the overall celebratory style.';
+    const groomAttireInstruction = (attire?.groom && attire.groom.trim() !== '')
         ? `Dress him in ${attire.groom}.`
-        : 'Dress him in a handsome and elegant traditional Indian sherwani.';
+        : 'His attire should be a handsome wedding style inspired by the clothing in his photo. Ensure it is tasteful and matches the overall celebratory style.';
     const coupleAttireInstruction = `
     - **Groom:** ${groomAttireInstruction}
     - **Bride:** ${brideAttireInstruction}

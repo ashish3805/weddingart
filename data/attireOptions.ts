@@ -1,8 +1,15 @@
-
 import { AttireOption } from '../types';
 import * as attireImages from '../assets/images';
 
 export const brideAttireOptions: AttireOption[] = [
+  {
+    id: 'auto-bride',
+    name: 'Auto (From Photo)',
+    description: 'AI creates wedding attire inspired by the uploaded photo.',
+    prompt: '',
+    imageUrl: attireImages.asInPhotoImage,
+    type: 'bride',
+  },
   {
     id: 'classic-lehenga',
     name: 'Classic Lehenga',
@@ -30,6 +37,14 @@ export const brideAttireOptions: AttireOption[] = [
 ];
 
 export const groomAttireOptions: AttireOption[] = [
+  {
+    id: 'auto-groom',
+    name: 'Auto (From Photo)',
+    description: 'AI creates wedding attire inspired by the uploaded photo.',
+    prompt: '',
+    imageUrl: attireImages.asInPhotoImage,
+    type: 'groom',
+  },
   {
     id: 'classic-sherwani',
     name: 'Classic Sherwani',
