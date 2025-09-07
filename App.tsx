@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { generateIllustration } from './services/geminiService';
+import { generateIllustration, combineIllustrations } from './services/geminiService';
 import { CoupleIcon } from './components/CoupleIcon';
 import { Loader } from './components/Loader';
 import type { GenerateContentResponse } from '@google/genai';
@@ -98,39 +98,26 @@ const App: React.FC = () => {
   });
 
   useEffect(() => {
-    // This effect handles auto-checking options when an image is first uploaded.
     const prev = prevAvailabilityRef.current;
-    const updates: Partial<Record<GenerationType, boolean>> = {};
-
-    if (!prev.bride && isBrideOptionAvailable) {
-        updates.bride = true;
-    }
-    if (!prev.groom && isGroomOptionAvailable) {
-        updates.groom = true;
-    }
-    if (!prev.couple && isCoupleOptionAvailable) {
-        updates.couple = true;
-    }
-
-    if (Object.keys(updates).length > 0) {
-        setSelectedOutputs(prevOutputs => ({ ...prevOutputs, ...updates }));
-    }
-
-    // This effect also handles unchecking options if they become unavailable.
-    const nextState = { ...selectedOutputs, ...updates };
-    if (!isBrideOptionAvailable) nextState.bride = false;
-    if (!isGroomOptionAvailable) nextState.groom = false;
-    if (!isCoupleOptionAvailable) nextState.couple = false;
-
+    let nextState = { ...selectedOutputs };
+  
+    // Auto-check if newly available
+    if (!prev.bride && isBrideOptionAvailable) nextState.bride = true;
+    if (!prev.groom && isGroomOptionAvailable) nextState.groom = true;
+    if (!prev.couple && isCoupleOptionAvailable) nextState.couple = true;
+  
+    // Un-check if becomes unavailable
+    if (!isBrideOptionAvailable && nextState.bride) nextState.bride = false;
+    if (!isGroomOptionAvailable && nextState.groom) nextState.groom = false;
+    if (!isCoupleOptionAvailable && nextState.couple) nextState.couple = false;
+  
     setSelectedOutputs(nextState);
-
-    // Update the ref for the next render.
+  
     prevAvailabilityRef.current = {
-        bride: isBrideOptionAvailable,
-        groom: isGroomOptionAvailable,
-        couple: isCoupleOptionAvailable
+      bride: isBrideOptionAvailable,
+      groom: isGroomOptionAvailable,
+      couple: isCoupleOptionAvailable
     };
-
   }, [isBrideOptionAvailable, isGroomOptionAvailable, isCoupleOptionAvailable]);
 
 
@@ -167,71 +154,121 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = useCallback(async () => {
-    const selectedTypes = (Object.keys(selectedOutputs) as GenerationType[]).filter(key => selectedOutputs[key]);
-    if (selectedTypes.length === 0) {
-      setError('Please select at least one type of illustration to generate.');
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     setGeneratedImages([]);
 
-    const generationPromises = selectedTypes.map(type => {
-        const brideB64 = brideImage.compressedBase64?.split(',')[1];
-        const groomB64 = groomImage.compressedBase64?.split(',')[1];
-        const cardB64 = cardImage.compressedBase64?.split(',')[1];
-        return generateIllustration(type, { bride: brideB64, groom: groomB64, card: cardB64 });
-    });
+    const brideB64 = brideImage.compressedBase64?.split(',')[1];
+    const groomB64 = groomImage.compressedBase64?.split(',')[1];
+    const cardB64 = cardImage.compressedBase64?.split(',')[1];
+
+    const successfulResults: GeneratedImageState[] = [];
+    const failedReasons: string[] = [];
+
+    let generatedBrideB64: string | null = null;
+    let generatedGroomB64: string | null = null;
+
+    // Helper to process API responses and avoid duplication
+    const processApiResponse = async (
+        response: GenerateContentResponse,
+        type: string
+    ): Promise<{ state: GeneratedImageState, b64: string } | null> => {
+        if (response?.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    const base64Data: string = part.inlineData.data;
+                    const fullBase64 = `data:image/png;base64,${base64Data}`;
+                    const originalSize = atob(base64Data).length;
+                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, 0.9);
+                    
+                    const state: GeneratedImageState = {
+                        title: `${type.charAt(0).toUpperCase() + type.slice(1)} Illustration`,
+                        originalBase64: fullBase64,
+                        compressedBase64,
+                        originalSize,
+                        compressedSize,
+                        compressionQuality: 0.9,
+                    };
+                    return { state, b64: base64Data };
+                }
+            }
+        }
+        return null;
+    };
+
 
     try {
-      const results = await Promise.allSettled(generationPromises);
-      const successfulResults: GeneratedImageState[] = [];
-      const failedReasons: string[] = [];
-
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const type = selectedTypes[i];
-
-        if (result.status === 'fulfilled') {
-          const response: GenerateContentResponse = result.value;
-          let foundImage = false;
-          if (response?.candidates?.[0]?.content?.parts) {
-            for (const part of response.candidates[0].content.parts) {
-              if (part.inlineData) {
-                const base64Data: string = part.inlineData.data;
-                const fullBase64 = `data:image/png;base64,${base64Data}`;
-                const originalSize = atob(base64Data).length;
-
-                const initialQuality = 0.9;
-                const { compressedBase64, compressedSize } = await compressImage(fullBase64, initialQuality);
-                
-                successfulResults.push({
-                    title: `${type.charAt(0).toUpperCase() + type.slice(1)} Illustration`,
-                    originalBase64: fullBase64,
-                    compressedBase64,
-                    originalSize,
-                    compressedSize,
-                    compressionQuality: initialQuality,
-                });
-                foundImage = true;
-                break;
-              }
-            }
-          }
-          if (!foundImage) {
-            failedReasons.push(`No image was generated for ${type}. The model may have refused the request.`);
-          }
-        } else {
-            failedReasons.push(`Failed to generate ${type} illustration: ${result.reason instanceof Error ? result.reason.message : 'Unknown reason'}`);
+        // Step 1: Generate individual portraits if they are selected OR needed for the couple illustration
+        const needsBride = selectedOutputs.bride || selectedOutputs.couple;
+        const needsGroom = selectedOutputs.groom || selectedOutputs.couple;
+        
+        const individualPromises = [];
+        if (needsBride && brideB64) {
+            individualPromises.push(generateIllustration('bride', { bride: brideB64, card: cardB64 }));
         }
-      }
+        if (needsGroom && groomB64) {
+            individualPromises.push(generateIllustration('groom', { groom: groomB64, card: cardB64 }));
+        }
+        
+        const individualResults = await Promise.allSettled(individualPromises);
 
-      setGeneratedImages(successfulResults);
+        let resultIndex = 0;
+        if (needsBride && brideB64) {
+            const brideResult = individualResults[resultIndex++];
+            if (brideResult.status === 'fulfilled') {
+                const processed = await processApiResponse(brideResult.value, 'Bride');
+                if (processed) {
+                    generatedBrideB64 = processed.b64;
+                    if (selectedOutputs.bride) successfulResults.push(processed.state);
+                } else {
+                    failedReasons.push('No image was generated for the Bride.');
+                }
+            } else {
+                failedReasons.push(`Failed to generate Bride portrait: ${brideResult.reason?.message || 'Unknown reason'}`);
+            }
+        }
 
-      if (failedReasons.length > 0) {
-        setError(failedReasons.join('\n'));
-      }
+        if (needsGroom && groomB64) {
+            const groomResult = individualResults[resultIndex++];
+            if (groomResult.status === 'fulfilled') {
+                const processed = await processApiResponse(groomResult.value, 'Groom');
+                if (processed) {
+                    generatedGroomB64 = processed.b64;
+                    if (selectedOutputs.groom) successfulResults.push(processed.state);
+                } else {
+                    failedReasons.push('No image was generated for the Groom.');
+                }
+            } else {
+                failedReasons.push(`Failed to generate Groom portrait: ${groomResult.reason?.message || 'Unknown reason'}`);
+            }
+        }
+        
+        setGeneratedImages([...successfulResults]); // Show individual portraits as they finish
+
+        // Step 2: Generate couple illustration if selected and prerequisites are met
+        if (selectedOutputs.couple) {
+            if (generatedBrideB64 && generatedGroomB64) {
+                try {
+                    const response = await combineIllustrations(generatedBrideB64, generatedGroomB64, cardB64);
+                    const processed = await processApiResponse(response, 'Couple');
+                    if (processed) {
+                        successfulResults.push(processed.state);
+                    } else {
+                        failedReasons.push('Failed to generate Couple illustration from combined portraits.');
+                    }
+                } catch(e: any) {
+                    failedReasons.push(`Failed to combine portraits: ${e.message}`);
+                }
+            } else {
+                failedReasons.push('Couple illustration could not be created because one or both individual portraits failed to generate.');
+            }
+        }
+
+        setGeneratedImages(successfulResults);
+
+        if (failedReasons.length > 0) {
+            setError(failedReasons.join('\n'));
+        }
 
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
@@ -240,7 +277,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [brideImage, groomImage, cardImage, selectedOutputs]);
+  }, [brideImage, groomImage, cardImage, selectedOutputs, isCoupleOptionAvailable]);
 
     const handleOutputCompressionChange = useCallback(async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
         const newQuality = parseFloat(e.target.value);
@@ -370,7 +407,7 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   {generatedImages.map((image, index) => (
                       <OutputDisplay 
-                        key={index}
+                        key={image.title} // Use a more stable key
                         generatedImage={image}
                         onCompressionChange={(e) => handleOutputCompressionChange(index, e)}
                         onDownload={() => handleDownload(index)}

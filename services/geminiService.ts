@@ -100,3 +100,47 @@ export const generateIllustration = async (
 
   return response;
 };
+
+export const combineIllustrations = async (
+  brideIllustration: string,
+  groomIllustration: string,
+  card?: string
+): Promise<GenerateContentResponse> => {
+  const cardProvided = !!card;
+  
+  const styleInstruction = cardProvided
+    ? "The overall mood, color palette, and artistic elegance must blend seamlessly with the aesthetic of the provided wedding card image."
+    : "The final image should have warm, celebratory, and elegant tones suitable for a wedding invitation.";
+
+  const prompt = `
+You are an expert digital artist specializing in combining portraits. Your task is to take the two provided illustrations—one of a bride and one of a groom—and merge them into a single, cohesive couple's portrait.
+
+**Core Instructions:**
+1.  **Preserve Style and Features:** It is crucial that you maintain the exact art style, facial features, colors, and attire from the individual illustrations. Do not redraw or reinterpret the characters.
+2.  **Combine and Compose:** Arrange the bride and groom together in a natural, celebratory pose suitable for a wedding portrait. They should look like they are in the same scene.
+3.  **Aesthetic Integration:** ${styleInstruction}
+4.  **Output:** The output must be a single image file of the couple. The background should be simple or transparent. Do not add text or borders.
+`;
+
+  const parts: Part[] = [
+    { text: prompt },
+    { inlineData: { mimeType: 'image/jpeg', data: brideIllustration } },
+    { inlineData: { mimeType: 'image/jpeg', data: groomIllustration } }
+  ];
+
+  if (cardProvided && card) {
+    parts.push({
+      inlineData: { mimeType: 'image/jpeg', data: card },
+    });
+  }
+
+  const response = await ai.models.generateContent({
+    model: model,
+    contents: { parts },
+    config: {
+      responseModalities: [Modality.IMAGE, Modality.TEXT],
+    },
+  });
+
+  return response;
+};

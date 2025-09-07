@@ -1,12 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
 
 const loadingMessages = [
-  "Our AI artist is sketching your portrait...",
+  "Our AI artist is warming up...",
+  "Sketching the individual portraits...",
   "Adding elegant details and traditional attire...",
-  "Perfecting the celebratory colors...",
-  "Blending styles for a seamless look...",
-  "Finalizing your beautiful illustration..."
+  "Now, combining portraits into a couple's illustration...",
+  "Ensuring perfect stylistic consistency...",
+  "Finalizing your beautiful artwork..."
 ];
 
 export const Loader: React.FC = () => {
