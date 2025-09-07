@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Modality, GenerateContentResponse, Part } from '@google/genai';
+import { GoogleGenAI, Modality, GenerateContentResponse, Part, Type } from '@google/genai';
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
@@ -296,4 +296,72 @@ Based on this conversation and all provided images, modify the illustration and 
   });
 
   return response;
+};
+
+export const planAlternatives = async (
+  base64Image: string,
+  mimeType: string,
+  imageType: 'bride' | 'groom' | 'couple'
+): Promise<GenerateContentResponse> => {
+    const basePrompt = `
+You are a creative director for wedding illustrations. Your task is to brainstorm 3 distinct and creative alternative scenarios for the provided illustration. The goal is to offer the user meaningful variations.
+
+**Rules:**
+1.  **Analyze the Image:** Look at the provided illustration to understand the subjects, their current attire, and pose.
+2.  **Generate Diverse Ideas:** Create 3 alternatives. Each alternative should describe a significant change in **pose, interaction, or attire**. Do not suggest simple color changes.
+3.  **Actionable Prompts:** For each alternative, write a short, catchy title (max 5 words) and a detailed, actionable prompt. The prompt should be a clear instruction for another AI artist to execute the change, starting from the original image. The prompt must explicitly mention preserving the faces and art style.
+4.  **Maintain Core Elements:** All suggestions must maintain the recognizable likeness of the people and the overall hand-illustrated art style. The background must remain transparent.
+5.  **Output Format:** You must respond in the specified JSON format.
+`;
+
+    let contextPrompt = '';
+    switch (imageType) {
+        case 'bride':
+            contextPrompt = `**Context:** The image is a solo portrait of a bride. Suggest alternatives focusing on elegant poses, different ways to feature her attire (e.g., holding her lehenga, a close-up on jewelry), or a different expressive mood.`;
+            break;
+        case 'groom':
+            contextPrompt = `**Context:** The image is a solo portrait of a groom. Suggest alternatives focusing on confident poses (e.g., adjusting a cufflink, looking over his shoulder), different styles of his sherwani, or adding a traditional element like a ceremonial sword (kirpan) or shawl.`;
+            break;
+        case 'couple':
+            contextPrompt = `**Context:** The image is a portrait of a couple. Suggest alternatives focusing on their interaction and pose. Ideas could include a romantic dance pose, sitting together on an elegant (unseen) bench, a playful back-to-back pose, or the groom lifting the bride.`;
+            break;
+    }
+
+    const fullPrompt = `${basePrompt}\n${contextPrompt}`;
+
+    const parts: Part[] = [
+        { text: fullPrompt },
+        { inlineData: { mimeType, data: base64Image } },
+    ];
+
+    const response = await ai.models.generateContent({
+        model: model,
+        contents: { parts },
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    alternatives: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                title: {
+                                    type: Type.STRING,
+                                    description: "A short, catchy title for the alternative (max 5 words)."
+                                },
+                                prompt: {
+                                    type: Type.STRING,
+                                    description: "A detailed, actionable prompt for an AI artist to generate this alternative."
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    });
+
+    return response;
 };

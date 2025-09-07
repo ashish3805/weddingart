@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { generateIllustration, combineIllustrations, createFinalInvitation, refineIllustration } from './services/geminiService';
+import { generateIllustration, combineIllustrations, createFinalInvitation, refineIllustration, planAlternatives } from './services/geminiService';
 import type { GenerateContentResponse } from '@google/genai';
 
 // Import from new modules
@@ -58,6 +58,8 @@ const App: React.FC = () => {
     history: [],
     isSending: false,
     attachment: null,
+    suggestions: null,
+    isSuggesting: false,
   });
 
   // Derived state and effects for option availability
@@ -480,11 +482,11 @@ const App: React.FC = () => {
     };
 
     const handleOpenChat = (imageId: string) => {
-        setChatState({ isOpen: true, targetImageId: imageId, history: [], isSending: false, attachment: null });
+        setChatState({ isOpen: true, targetImageId: imageId, history: [], isSending: false, attachment: null, suggestions: null, isSuggesting: false });
     };
 
     const handleCloseChat = () => {
-        setChatState({ isOpen: false, targetImageId: null, history: [], isSending: false, attachment: null });
+        setChatState({ isOpen: false, targetImageId: null, history: [], isSending: false, attachment: null, suggestions: null, isSuggesting: false });
     };
     
     const processMultiModalResponse = async (
@@ -590,6 +592,51 @@ const App: React.FC = () => {
         }
     };
     
+    const handleSuggestAlternatives = async () => {
+        if (!chatState.targetImageId || chatState.isSuggesting) return;
+
+        setChatState(prev => ({ ...prev, isSuggesting: true, suggestions: null }));
+
+        try {
+            const allImages = [...generatedImages, finalInviteImage].filter(Boolean) as GeneratedImageHistory[];
+            const targetImageHistory = allImages.find(img => img.id === chatState.targetImageId);
+            if (!targetImageHistory) throw new Error("Target image for suggestions not found.");
+
+            const currentVersion = targetImageHistory.versions[targetImageHistory.currentVersionIndex];
+            const base64ToRefine = currentVersion.originalBase64?.split(',')[1];
+            const mimeType = currentVersion.originalBase64?.match(/data:(.*);base64,/)?.[1] || 'image/png';
+            
+            let imageType: 'bride' | 'groom' | 'couple' | null = null;
+            if (targetImageHistory.title.toLowerCase().includes('bride')) imageType = 'bride';
+            else if (targetImageHistory.title.toLowerCase().includes('groom')) imageType = 'groom';
+            else if (targetImageHistory.title.toLowerCase().includes('couple')) imageType = 'couple';
+
+            if (!base64ToRefine || !imageType) {
+                throw new Error("Could not get image data or type for suggestions.");
+            }
+
+            const response = await planAlternatives(base64ToRefine, mimeType, imageType);
+            const jsonString = response.text;
+            
+            if (jsonString.trim().startsWith('{')) {
+                const parsed = JSON.parse(jsonString);
+                if (parsed.alternatives && Array.isArray(parsed.alternatives)) {
+                    setChatState(prev => ({ ...prev, suggestions: parsed.alternatives }));
+                } else {
+                    throw new Error("AI response did not contain valid 'alternatives' array.");
+                }
+            } else {
+                 throw new Error("AI did not return a valid JSON object.");
+            }
+
+        } catch (e: any) {
+            const errorMessage = e instanceof Error ? e.message : "An unknown error occurred while getting suggestions.";
+            setChatState(prev => ({ ...prev, history: [...prev.history, { role: 'model', text: `Sorry, an error occurred: ${errorMessage}` }] }));
+        } finally {
+            setChatState(prev => ({ ...prev, isSuggesting: false }));
+        }
+    };
+
     const handleChatAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -711,6 +758,7 @@ const App: React.FC = () => {
             onSendMessage={handleSendMessage}
             onAttachmentChange={handleChatAttachment}
             onRemoveAttachment={handleRemoveAttachment}
+            onSuggestAlternatives={handleSuggestAlternatives}
             targetImageTitle={targetImageTitle}
             targetImageType={targetImageType}
           />

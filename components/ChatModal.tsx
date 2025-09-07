@@ -8,6 +8,7 @@ interface ChatModalProps {
     onSendMessage: (msg: string) => void;
     onAttachmentChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onRemoveAttachment: () => void;
+    onSuggestAlternatives: () => void;
     targetImageTitle: string;
     targetImageType: GenerationType | null;
 }
@@ -37,7 +38,7 @@ const premadePrompts: Record<GenerationType, { title: string; prompt: string }[]
 };
 
 
-export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSendMessage, onAttachmentChange, onRemoveAttachment, targetImageTitle, targetImageType }) => {
+export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSendMessage, onAttachmentChange, onRemoveAttachment, onSuggestAlternatives, targetImageTitle, targetImageType }) => {
     const [message, setMessage] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +51,10 @@ export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSend
         e.preventDefault();
         onSendMessage(message);
         setMessage('');
+    };
+    
+    const handleSuggestionClick = (prompt: string) => {
+        onSendMessage(prompt);
     };
 
     if (!chatState.isOpen) return null;
@@ -64,28 +69,75 @@ export const ChatModal: React.FC<ChatModalProps> = ({ chatState, onClose, onSend
                     </button>
                 </header>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {chatState.history.length === 0 && targetImageType && premadePrompts[targetImageType] && (
+                    {chatState.history.length === 0 && (
                         <div className="text-center p-2 animate-fade-in">
-                            <h4 className="font-semibold text-gray-600 mb-3">Not sure where to start? Try one of these:</h4>
-                            <div className="flex flex-wrap justify-center gap-2">
-                                {premadePrompts[targetImageType].map((p) => (
+                            {!chatState.suggestions && (
+                                <div className="mb-4">
                                     <button 
-                                        key={p.title}
-                                        onClick={() => onSendMessage(p.prompt)}
-                                        className="px-3 py-2 text-sm bg-gray-200 text-[#5D4037] rounded-full hover:bg-[#C19A6B] hover:text-white transition-colors"
+                                        onClick={onSuggestAlternatives}
+                                        disabled={chatState.isSuggesting}
+                                        className="w-full inline-flex items-center justify-center px-6 py-3 text-lg font-bold text-white bg-gradient-to-r from-teal-500 to-cyan-600 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+                                        aria-label="Suggest creative alternatives for the illustration"
                                     >
-                                        {p.title}
+                                        {chatState.isSuggesting ? (
+                                            <>
+                                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                                Thinking...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a6 6 0 00-6 6v3.586l-1.707 1.707A1 1 0 003 15v4a1 1 0 001 1h12a1 1 0 001-1v-4a1 1 0 00-.293-.707L16 11.586V8a6 6 0 00-6-6zM8 18a1 1 0 01-1-1v-1h6v1a1 1 0 01-1 1H8z" /></svg>
+                                                Suggest Creative Alternatives
+                                            </>
+                                        )}
                                     </button>
-                                ))}
-                            </div>
+                                </div>
+                            )}
+
+                            {chatState.suggestions && (
+                                <div className="animate-fade-in">
+                                    <h4 className="font-semibold text-gray-600 mb-3">Here are a few ideas:</h4>
+                                    <div className="flex flex-wrap justify-center gap-2">
+                                        {chatState.suggestions.map((p, i) => (
+                                            <button 
+                                                key={i}
+                                                onClick={() => handleSuggestionClick(p.prompt)}
+                                                className="px-3 py-2 text-sm bg-teal-100 text-teal-800 rounded-full hover:bg-teal-200 transition-colors text-left"
+                                                title={p.prompt}
+                                            >
+                                                {p.title}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="relative my-4">
-                                <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                                    <div className="w-full border-t border-gray-300" />
-                                </div>
-                                <div className="relative flex justify-center">
-                                    <span className="bg-white px-2 text-sm text-gray-500">OR</span>
-                                </div>
+                                <div className="absolute inset-0 flex items-center" aria-hidden="true"><div className="w-full border-t border-gray-300" /></div>
+                                <div className="relative flex justify-center"><span className="bg-white px-2 text-sm text-gray-500">OR</span></div>
                             </div>
+                            
+                            {targetImageType && premadePrompts[targetImageType] && (
+                                <>
+                                <h4 className="font-semibold text-gray-600 mb-3">Make a specific change:</h4>
+                                <div className="flex flex-wrap justify-center gap-2">
+                                    {premadePrompts[targetImageType].map((p) => (
+                                        <button 
+                                            key={p.title}
+                                            onClick={() => onSendMessage(p.prompt)}
+                                            className="px-3 py-2 text-sm bg-gray-200 text-[#5D4037] rounded-full hover:bg-[#C19A6B] hover:text-white transition-colors"
+                                        >
+                                            {p.title}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="relative my-4">
+                                    <div className="absolute inset-0 flex items-center" aria-hidden="true"><div className="w-full border-t border-gray-300" /></div>
+                                    <div className="relative flex justify-center"><span className="bg-white px-2 text-sm text-gray-500">OR</span></div>
+                                </div>
+                                </>
+                            )}
+                             <p className="text-sm text-gray-500">Type your own request below.</p>
                         </div>
                     )}
                     {chatState.history.map((msg: ChatHistoryItem, index: number) => (

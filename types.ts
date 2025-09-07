@@ -32,6 +32,8 @@ export interface ChatState {
     history: ChatHistoryItem[];
     isSending: boolean;
     attachment: { data: string; name: string } | null;
+    suggestions: Array<{ title: string; prompt: string }> | null;
+    isSuggesting: boolean;
 }
 
 export type AttireType = 'bride' | 'groom';
