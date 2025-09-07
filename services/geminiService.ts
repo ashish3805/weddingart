@@ -1,5 +1,6 @@
-
 import { GoogleGenAI, Modality, GenerateContentResponse, Part } from '@google/genai';
+
+process.env.API_KEY="AIzaSyBKxKevs1rY2jn4k_FpN5yTHxYJoVaiJn8"
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
@@ -199,6 +200,46 @@ export const createFinalInvitation = async (
     { 
       inlineData: { mimeType: 'image/png', data: illustrationB64 },
     }
+  ];
+
+  const response = await ai.models.generateContent({
+    model: model,
+    contents: { parts },
+    config: {
+      responseModalities: [Modality.IMAGE, Modality.TEXT],
+    },
+  });
+
+  return response;
+};
+
+export const refineIllustration = async (
+  base64ImageToRefine: string,
+  imageMimeType: string,
+  prompt: string
+): Promise<GenerateContentResponse> => {
+  const refinePrompt = `
+You are an expert digital artist and image editor. You have been given an existing illustration and a user request to modify it.
+
+**Your Task:**
+1.  **Analyze the Request:** Carefully read the user's prompt to understand the desired changes.
+2.  **Modify the Image:** Apply the requested modifications to the provided illustration.
+3.  **Preserve Core Identity:** It is absolutely critical to maintain the person's recognizable facial features and the overall artistic style of the original illustration. Do not start from scratch.
+4.  **Transparent Background:** The final output image MUST have a fully transparent background, unless the user specifically asks for a background.
+
+User Request: "${prompt}"
+
+Modify the illustration based on this request and return only the new image.
+`;
+
+  const parts: Part[] = [
+    { text: refinePrompt },
+    {
+      inlineData: {
+        mimeType: imageMimeType,
+        data: base64ImageToRefine,
+      },
+    },
   ];
 
   const response = await ai.models.generateContent({
