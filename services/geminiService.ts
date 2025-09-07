@@ -335,7 +335,7 @@ You are a creative director for wedding illustrations. Your task is to brainstor
     ];
 
     const response = await ai.models.generateContent({
-        model: model,
+        model: 'gemini-2.5-flash',
         contents: { parts },
         config: {
             responseMimeType: "application/json",
