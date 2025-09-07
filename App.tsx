@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { generateIllustration, combineIllustrations, createFinalInvitation } from './services/geminiService';
 import { CoupleIcon } from './components/CoupleIcon';
@@ -35,7 +36,7 @@ const formatBytes = (bytes: number, decimals = 2) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 };
 
-const compressImage = (base64Str: string, quality: number): Promise<{ compressedBase64: string, compressedSize: number }> => {
+const compressImage = (base64Str: string, quality: number, outputFormat: 'image/jpeg' | 'image/png' = 'image/jpeg'): Promise<{ compressedBase64: string, compressedSize: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
@@ -64,8 +65,8 @@ const compressImage = (base64Str: string, quality: number): Promise<{ compressed
         return reject(new Error('Could not get canvas context'));
       }
       ctx.drawImage(img, 0, 0, width, height);
-      const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-      const stringLength = compressedBase64.length - 'data:image/jpeg;base64,'.length;
+      const compressedBase64 = canvas.toDataURL(outputFormat, outputFormat === 'image/jpeg' ? quality : undefined);
+      const stringLength = compressedBase64.length - `data:${outputFormat};base64,`.length;
       const sizeInBytes = 4 * Math.ceil(stringLength / 3) * 0.5624896334383812;
       resolve({ compressedBase64, compressedSize: sizeInBytes });
     };
@@ -171,9 +172,14 @@ const App: React.FC = () => {
             for (const part of response.candidates[0].content.parts) {
                 if (part.inlineData) {
                     const base64Data: string = part.inlineData.data;
-                    const fullBase64 = `data:image/png;base64,${base64Data}`;
+                    const apiMimeType = part.inlineData.mimeType || 'image/png';
+                    const fullBase64 = `data:${apiMimeType};base64,${base64Data}`;
                     const originalSize = atob(base64Data).length;
-                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, quality);
+
+                    const isIllustration = type.toLowerCase().includes('illustration');
+                    const outputFormat = isIllustration ? 'image/png' : 'image/jpeg';
+                    
+                    const { compressedBase64, compressedSize } = await compressImage(fullBase64, quality, outputFormat);
                     
                     const state: GeneratedImageState = {
                         title: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
@@ -340,7 +346,11 @@ const App: React.FC = () => {
 
         const link = document.createElement('a');
         link.href = imageToDownload.compressedBase64;
-        const fileName = `${imageToDownload.title.toLowerCase().replace(/ /g, '-')}.jpg`;
+        
+        const isPng = imageToDownload.compressedBase64.startsWith('data:image/png');
+        const extension = isPng ? 'png' : 'jpg';
+        const fileName = `${imageToDownload.title.toLowerCase().replace(/ /g, '-')}.${extension}`;
+
         link.download = fileName;
         document.body.appendChild(link);
         link.click();
@@ -450,12 +460,26 @@ const App: React.FC = () => {
             <div className="mt-12 animate-fade-in">
               <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Your Custom Creations</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {generatedImages.map((image, index) => ( <OutputDisplay key={image.title} generatedImage={image} onCompressionChange={(e) => handleOutputCompressionChange(index, e)} onDownload={() => handleDownload(index)} showTransparency={true} /> ))}
+                  {generatedImages.map((image, index) => {
+                      const isPng = !!image.compressedBase64?.startsWith('data:image/png');
+                      return (
+                        <OutputDisplay 
+                            key={image.title} 
+                            generatedImage={image} 
+                            onCompressionChange={(e) => handleOutputCompressionChange(index, e)} 
+                            onDownload={() => handleDownload(index)} 
+                            showTransparency={isPng}
+                            isQualityAdjustable={!isPng}
+                        />
+                      );
+                  })}
                   {finalInviteImage && (
                     <OutputDisplay
                         generatedImage={finalInviteImage}
                         onCompressionChange={handleFinalInviteCompressionChange}
                         onDownload={handleFinalInviteDownload}
+                        isQualityAdjustable={true}
+                        showTransparency={false}
                     />
                   )}
               </div>
@@ -489,8 +513,8 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, imageState, onFile
     );
 };
 
-interface OutputDisplayProps { generatedImage: GeneratedImageState; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; showTransparency?: boolean; }
-const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload, showTransparency = false }) => (
+interface OutputDisplayProps { generatedImage: GeneratedImageState; onCompressionChange: (e: React.ChangeEvent<HTMLInputElement>) => void; onDownload: () => void; showTransparency?: boolean; isQualityAdjustable?: boolean; }
+const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompressionChange, onDownload, showTransparency = false, isQualityAdjustable = true }) => (
     <div className="text-center w-full">
         <h3 className="text-2xl font-bold mb-4 text-[#5D4037]">{generatedImage.title}</h3>
         <div className={`p-3 rounded-2xl shadow-2xl border-4 border-double border-[#C19A6B] ${showTransparency ? 'checkerboard' : 'bg-white'}`}>
@@ -500,9 +524,10 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ generatedImage, onCompres
             <div className="mb-4">
                 <label htmlFor={`compression-${generatedImage.title}`} className="block text-md font-medium text-[#5D4037] mb-2">Adjust Image Quality</label>
                 <div className="flex items-center gap-4">
-                    <input id={`compression-${generatedImage.title}`} type="range" min="0.1" max="1" step="0.05" value={generatedImage.compressionQuality} onChange={onCompressionChange} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" aria-label={`Adjust compression quality for ${generatedImage.title}`} />
+                    <input id={`compression-${generatedImage.title}`} type="range" min="0.1" max="1" step="0.05" value={generatedImage.compressionQuality} onChange={onCompressionChange} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:bg-gray-300 disabled:cursor-not-allowed" aria-label={`Adjust compression quality for ${generatedImage.title}`} disabled={!isQualityAdjustable} />
                     <span className="font-semibold text-lg text-[#8D6E63] w-16 text-right">{Math.round(generatedImage.compressionQuality * 100)}%</span>
                 </div>
+                 {!isQualityAdjustable && <p className="text-xs text-gray-500 mt-2">Quality adjustment is for JPEGs. This is a PNG to preserve transparency.</p>}
             </div>
             {generatedImage.originalSize && generatedImage.compressedSize && ( <div className="text-center text-md text-gray-700 my-3 bg-gray-100 p-2 rounded-md"> <p>Est. Original: <span className="font-medium">{formatBytes(generatedImage.originalSize)}</span></p> <p>Compressed: <span className="font-medium text-green-700">{formatBytes(generatedImage.compressedSize)}</span></p> </div> )}
             <button onClick={onDownload} className="w-full mt-2 inline-flex items-center justify-center px-8 py-3 text-lg font-bold text-white bg-gradient-to-r from-green-500 to-green-700 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out" aria-label={`Download ${generatedImage.title}`} > <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download </button>
