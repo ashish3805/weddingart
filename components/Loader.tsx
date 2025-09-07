@@ -6,7 +6,9 @@ const loadingMessages = [
   "Adding elegant details and traditional attire...",
   "Now, combining portraits into a couple's illustration...",
   "Ensuring perfect stylistic consistency...",
-  "Finalizing your beautiful artwork..."
+  "Preparing your wedding invitation background...",
+  "AI is finding the perfect spot for the illustration...",
+  "Finalizing your beautiful invitation..."
 ];
 
 export const Loader: React.FC = () => {

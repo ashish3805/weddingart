@@ -87,10 +87,8 @@ const App: React.FC = () => {
       couple: false,
   });
 
-  // State for the new invite creator
   const [weddingInviteBg, setWeddingInviteBg] = useState<ImageState>(initialImageState);
-  const [selectedIllustrationUrl, setSelectedIllustrationUrl] = useState<string | null>(null);
-  const [isGeneratingInvite, setIsGeneratingInvite] = useState<boolean>(false);
+  const [generateInvite, setGenerateInvite] = useState<boolean>(false);
   const [finalInviteImage, setFinalInviteImage] = useState<GeneratedImageState | null>(null);
 
   const isBrideOptionAvailable = !!brideImage.compressedBase64;
@@ -143,7 +141,6 @@ const App: React.FC = () => {
         else if (imageType === 'card') setCardImage(newState);
         else if (imageType === 'inviteBg') {
             setWeddingInviteBg(newState);
-            setFinalInviteImage(null); // Reset final invite if background changes
         }
 
       } catch (err) {
@@ -190,6 +187,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     setError(null);
     setGeneratedImages([]);
+    setFinalInviteImage(null);
 
     const brideB64 = brideImage.compressedBase64?.split(',')[1];
     const groomB64 = groomImage.compressedBase64?.split(',')[1];
@@ -268,6 +266,37 @@ const App: React.FC = () => {
 
         setGeneratedImages(successfulResults);
 
+        // --- One-shot Invite Generation Logic ---
+        if (generateInvite && weddingInviteBg.compressedBase64) {
+            const coupleIllustration = successfulResults.find(img => img.title.includes('Couple'));
+            const brideIllustration = successfulResults.find(img => img.title.includes('Bride'));
+            const groomIllustration = successfulResults.find(img => img.title.includes('Groom'));
+            const illustrationToUse = coupleIllustration || brideIllustration || groomIllustration;
+
+            if (illustrationToUse && illustrationToUse.originalBase64) {
+                try {
+                    const illustrationB64 = illustrationToUse.originalBase64.split(',')[1];
+                    const backgroundB64 = weddingInviteBg.compressedBase64.split(',')[1];
+                    
+                    const response = await createFinalInvitation(illustrationB64, backgroundB64);
+                    
+                    const processed = await processApiResponse(response, 'Final Wedding Invitation');
+                    if (processed) {
+                        setFinalInviteImage(processed.state);
+                    } else {
+                        failedReasons.push("The AI failed to generate the final invitation image.");
+                    }
+                } catch (e: any) {
+                    failedReasons.push(`Failed to create the final invitation: ${e.message}`);
+                }
+            } else if (successfulResults.length > 0) {
+                 failedReasons.push('Could not create final invite because no illustration was successfully generated to place on it.');
+            } else {
+                failedReasons.push('Skipping invitation generation as no base illustrations were created.');
+            }
+        }
+
+
         if (failedReasons.length > 0) {
             setError(failedReasons.join('\n'));
         }
@@ -279,7 +308,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [brideImage, groomImage, cardImage, selectedOutputs]);
+  }, [brideImage, groomImage, cardImage, selectedOutputs, generateInvite, weddingInviteBg.compressedBase64]);
 
     const handleOutputCompressionChange = useCallback(async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
         const newQuality = parseFloat(e.target.value);
@@ -318,59 +347,13 @@ const App: React.FC = () => {
         if (bride && !brideImage.compressedBase64) return true;
         if (groom && !groomImage.compressedBase64) return true;
         if (couple && !isCoupleOptionAvailable) return true;
+        if (generateInvite && !weddingInviteBg.compressedBase64) return true;
         
         return false;
     };
     const isGenerateDisabled = getIsGenerateDisabled();
 
-    // --- Invite Creator Logic ---
-    useEffect(() => {
-        if (generatedImages.length > 0 && !selectedIllustrationUrl) {
-            const coupleImage = generatedImages.find(img => img.title.includes('Couple'));
-            const defaultSelection = coupleImage || generatedImages[0];
-            if (defaultSelection?.originalBase64) {
-                setSelectedIllustrationUrl(defaultSelection.originalBase64);
-            }
-        } else if (generatedImages.length === 0) {
-            setSelectedIllustrationUrl(null);
-        }
-    }, [generatedImages, selectedIllustrationUrl]);
-
-    const handleIllustrationSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const selectedUrl = e.target.value;
-        setSelectedIllustrationUrl(selectedUrl);
-        setFinalInviteImage(null); // Reset final invite if selection changes
-    };
-
-    const handleGenerateInvite = useCallback(async () => {
-        if (!selectedIllustrationUrl || !weddingInviteBg.compressedBase64) {
-            setError("Please select an illustration and upload an invite background.");
-            return;
-        }
-        setIsGeneratingInvite(true);
-        setError(null);
-        setFinalInviteImage(null);
-
-        try {
-            const illustrationB64 = selectedIllustrationUrl.split(',')[1];
-            const backgroundB64 = weddingInviteBg.compressedBase64.split(',')[1];
-            
-            const response = await createFinalInvitation(illustrationB64, backgroundB64);
-            
-            const processed = await processApiResponse(response, 'Final Wedding Invitation');
-            if (processed) {
-                setFinalInviteImage(processed.state);
-            } else {
-                throw new Error("The AI failed to generate the final invitation image.");
-            }
-
-        } catch (e: any) {
-            setError(`Failed to create the final invitation: ${e.message}`);
-        } finally {
-            setIsGeneratingInvite(false);
-        }
-    }, [selectedIllustrationUrl, weddingInviteBg.compressedBase64]);
-
+    // --- Final Invite specific handlers ---
     const handleFinalInviteCompressionChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         const newQuality = parseFloat(e.target.value);
         if (!finalInviteImage || !finalInviteImage.originalBase64) return;
@@ -423,95 +406,53 @@ const App: React.FC = () => {
           </div>
 
            <div className="text-center mb-10 p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
-              <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 2: Generate Illustrations</h2>
-              <fieldset className="max-w-2xl mx-auto mb-6 p-4 border-2 border-dashed border-[#C19A6B] rounded-xl">
-                  <legend className="px-2 font-semibold text-lg text-[#5D4037]">Choose which illustrations to create</legend>
+              <h2 className="text-2xl font-bold text-center mb-4 text-[#5D4037]">Step 2: Choose What to Create</h2>
+              <fieldset className="max-w-3xl mx-auto mb-6 p-4 border-2 border-dashed border-[#C19A6B] rounded-xl">
+                  <legend className="px-2 font-semibold text-lg text-[#5D4037]">Generation Options</legend>
                   <div className="flex justify-center items-center gap-4 sm:gap-8 flex-wrap mt-2">
                       <Checkbox id="bride-check" label="Bride Portrait" checked={selectedOutputs.bride} onChange={() => handleSelectionChange('bride')} disabled={!isBrideOptionAvailable} />
                       <Checkbox id="groom-check" label="Groom Portrait" checked={selectedOutputs.groom} onChange={() => handleSelectionChange('groom')} disabled={!isGroomOptionAvailable} />
                       <Checkbox id="couple-check" label="Couple Illustration" checked={selectedOutputs.couple} onChange={() => handleSelectionChange('couple')} disabled={!isCoupleOptionAvailable} />
+                      <Checkbox id="invite-check" label="Final Invitation" checked={generateInvite} onChange={() => setGenerateInvite(prev => !prev)} />
                   </div>
               </fieldset>
+
+              {generateInvite && (
+                <div className="max-w-md mx-auto my-6 p-4 bg-white/50 rounded-xl border-2 border-[#E0D5C1] animate-fade-in">
+                    <h3 className="text-xl font-semibold text-center mb-4 text-[#5D4037]">Upload Invitation Background</h3>
+                    <ImageUploader title="" imageState={weddingInviteBg} onFileChange={(e) => handleFileChange(e, 'inviteBg')} id="invite-bg-upload" />
+                </div>
+              )}
 
             <button
               onClick={handleGenerate}
               disabled={isGenerateDisabled}
               className="relative inline-flex items-center justify-center px-10 py-4 text-xl font-bold text-white bg-gradient-to-r from-[#C19A6B] to-[#8D6E63] rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-              aria-label="Generate wedding illustration"
+              aria-label="Generate wedding illustrations and invitation"
             >
-              {isLoading ? ( <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Creating...</> ) : 'Generate Illustrations'}
+              {isLoading ? ( <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Creating...</> ) : (generateInvite ? 'Generate All' : 'Generate Illustrations')}
             </button>
           </div>
 
           {isLoading && <Loader />}
           
           {error && !isLoading && ( <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md max-w-3xl mx-auto my-4 whitespace-pre-wrap" role="alert"> <p className="font-bold">An Error Occurred</p> <p>{error}</p> </div> )}
-
-          {generatedImages.length > 0 && (
+          
+          {(generatedImages.length > 0 || finalInviteImage) && (
             <div className="mt-12 animate-fade-in">
-              <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Your Custom Illustrations</h2>
+              <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Your Custom Creations</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   {generatedImages.map((image, index) => ( <OutputDisplay key={image.title} generatedImage={image} onCompressionChange={(e) => handleOutputCompressionChange(index, e)} onDownload={() => handleDownload(index)} /> ))}
+                  {finalInviteImage && (
+                    <OutputDisplay
+                        generatedImage={finalInviteImage}
+                        onCompressionChange={handleFinalInviteCompressionChange}
+                        onDownload={handleFinalInviteDownload}
+                    />
+                  )}
               </div>
             </div>
           )}
-
-          {generatedImages.length > 0 && (
-            <div className="mt-16 pt-10 border-t-4 border-dashed border-[#C19A6B] animate-fade-in">
-                <h2 className="text-3xl font-bold mb-6 text-center text-[#5D4037]">Step 3: Create Your Final Invitation</h2>
-                <div className="p-6 bg-white/60 rounded-2xl shadow-lg border-2 border-[#E0D5C1]">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                        {/* Column 1: Controls */}
-                        <div className="space-y-6">
-                            <div>
-                                <label htmlFor="illustration-select" className="block text-lg font-semibold mb-2 text-[#5D4037]">1. Select Illustration</label>
-                                <select id="illustration-select" value={selectedIllustrationUrl || ''} onChange={handleIllustrationSelect} className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-[#C19A6B] focus:border-[#C19A6B]">
-                                    {generatedImages.map(img => <option key={img.title} value={img.originalBase64!}>{img.title}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                               <h3 className="text-lg font-semibold mb-2 text-[#5D4037]">2. Upload Invite Background</h3>
-                               <ImageUploader title="" imageState={weddingInviteBg} onFileChange={(e) => handleFileChange(e, 'inviteBg')} id="invite-bg-upload" />
-                            </div>
-                            <div>
-                                <button
-                                    onClick={handleGenerateInvite}
-                                    disabled={!selectedIllustrationUrl || !weddingInviteBg.compressedBase64 || isGeneratingInvite}
-                                    className="w-full relative inline-flex items-center justify-center px-10 py-4 text-xl font-bold text-white bg-gradient-to-r from-[#5D4037] to-[#8D6E63] rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                                >
-                                    {isGeneratingInvite ? (
-                                        <><svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Placing Illustration...</>
-                                    ) : 'Let AI Create Your Invite'}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Column 2: Result */}
-                        <div className="bg-gray-200 rounded-lg shadow-inner flex items-center justify-center p-4 min-h-[400px] aspect-w-3 aspect-h-4 lg:aspect-none">
-                             {isGeneratingInvite ? (
-                                <div className="text-center">
-                                    <div className="w-12 h-12 mx-auto border-4 border-t-4 border-gray-300 border-t-[#C19A6B] rounded-full animate-spin"></div>
-                                    <p className="mt-4 font-semibold text-lg text-gray-600">AI is finding the perfect spot...</p>
-                                </div>
-                            ) : finalInviteImage ? (
-                                <OutputDisplay
-                                    generatedImage={finalInviteImage}
-                                    onCompressionChange={handleFinalInviteCompressionChange}
-                                    onDownload={handleFinalInviteDownload}
-                                />
-                            ) : (
-                                <div className="text-center text-gray-500">
-                                   <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                   <p className="mt-4 font-semibold text-lg">Your final invitation will appear here</p>
-                                   <p>Select an illustration, upload a background, and let the AI work its magic.</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                     {error && (isGeneratingInvite || (finalInviteImage === null && weddingInviteBg.originalBase64)) && ( <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mt-4 rounded-lg shadow-md max-w-full mx-auto whitespace-pre-wrap" role="alert"> <p className="font-bold">An Error Occurred</p> <p>{error}</p> </div> )}
-                </div>
-            </div>
-           )}
 
         </main>
       </div>
